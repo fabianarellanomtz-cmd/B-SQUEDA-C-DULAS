@@ -260,7 +260,7 @@ function resetToUploadState() {
     }
     if (accessKeyStatus) {
         accessKeyStatus.className = "access-status-text";
-        accessKeyStatus.textContent = "Sin clave: se aplicará tarifa de validación por fila.";
+        accessKeyStatus.textContent = "Promoción activa: Búsquedas masivas gratis por tiempo limitado.";
     }
     if (billingTotalCost) {
         billingTotalCost.textContent = "$0.00 MXN";
@@ -541,7 +541,7 @@ function initBilling() {
         if (!code) {
             inputAccessKey.className = "custom-input";
             accessKeyStatus.className = "access-status-text";
-            accessKeyStatus.textContent = "Sin clave: se aplicará tarifa de validación por fila.";
+            accessKeyStatus.textContent = "Promoción activa: Búsquedas masivas gratis por tiempo limitado.";
             isAuthorized = false;
             evaluatePaymentStatus();
             return;

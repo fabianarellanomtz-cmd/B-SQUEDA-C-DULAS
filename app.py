@@ -568,7 +568,7 @@ def preview_file():
         # Convert df to records to store safely in active memory
         records = df.to_dict(orient="records")
         total_rows = len(df)
-        amount_mxn = max(0.0, (total_rows - 10) * 0.10)
+        amount_mxn = 0.0  # Temporalmente gratis de forma ilimitada para pruebas generales con usuarios
         
         ACTIVE_JOBS[job_id] = {
             "records": records,
