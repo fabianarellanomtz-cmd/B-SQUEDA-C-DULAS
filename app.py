@@ -596,21 +596,22 @@ def get_sep_token():
             return token
     except Exception as e:
         print("First attempt to obtain token failed:", str(e))
-        # Clear dynamic proxy cache and force a refresh/retry
+        # Always clear dynamic proxy cache and force a refresh/retry to find a working one
         global DYNAMIC_MEXICO_PROXY
-        if DYNAMIC_MEXICO_PROXY["proxy_url"]:
-            print("Clearing failed dynamic proxy cache and retrying...")
-            DYNAMIC_MEXICO_PROXY["proxy_url"] = None
-            try:
-                resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True), timeout=6)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    token = data.get("access_token")
-                    SEP_TOKEN_CACHE["token"] = token
-                    SEP_TOKEN_CACHE["expires_at"] = time.time() + 3000
-                    return token
-            except Exception as e2:
-                print("Retry obtaining token failed:", str(e2))
+        print("[PROXY] Limpiando caché e intentando de nuevo con force_refresh=True...")
+        DYNAMIC_MEXICO_PROXY["proxy_url"] = None
+        try:
+            resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True), timeout=6)
+            if resp.status_code == 200:
+                data = resp.json()
+                token = data.get("access_token")
+                SEP_TOKEN_CACHE["token"] = token
+                SEP_TOKEN_CACHE["expires_at"] = time.time() + 3000
+                return token
+            else:
+                print("[PROXY] Reintento de obtención de token falló con código:", resp.status_code)
+        except Exception as e2:
+            print("Retry obtaining token failed:", str(e2))
                 
     return None
 
@@ -1104,7 +1105,7 @@ def process_job(job_id):
                     results_accumulated.append({
                         "original_row": row,
                         "searched_name": searched_name_raw,
-                        "estatus": "No Encontrado (Sin registro en BúhoLegal)",
+                        "estatus": "No Encontrado (Sin registro en la SEP)",
                         "id_resultado": "N/A",
                         "cedula": "",
                         "tipo": "NOT_FOUND",

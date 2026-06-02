@@ -665,7 +665,7 @@ btnStartProcess.addEventListener("click", () => {
 
 function startScrapingProcess() {
     isProcessing = true;
-    appendLog(`[PROCESO] Iniciando consultas masivas en BúhoLegal. ETA aproximado: ${Math.round(totalRecords * 2.5)}s`, "info");
+    appendLog(`[PROCESO] Iniciando consultas masivas en la API Oficial de la SEP. ETA aproximado: ${Math.round(totalRecords * 2.2)}s`, "info");
     
     // Disable file switching during run
     btnChangeFile.setAttribute("disabled", "true");
@@ -735,7 +735,7 @@ function startScrapingProcess() {
         }
         
         else if (data.status === "captcha_required") {
-            appendLog(`[CAPTCHA] ¡BúhoLegal ha activado una validación CAPTCHA! Pausando consultas de forma segura...`, "error");
+            appendLog(`[SEGURIDAD] ¡La API de la SEP ha activado una validación de seguridad! Pausando consultas de forma segura...`, "error");
             pauseScrapingProcess(true); // Open modal
         }
         
