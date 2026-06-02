@@ -1198,7 +1198,10 @@ def process_job(job_id):
         job["current_index"] = len(records)
         yield f"data: {json.dumps({'status': 'completed', 'total_processed': len(records)})}\n\n"
 
-    return Response(event_stream(), mimetype="text/event-stream")
+    resp = Response(event_stream(), mimetype="text/event-stream")
+    resp.headers["X-Accel-Buffering"] = "no"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 @app.route("/api/download/<job_id>", methods=["GET"])
 def download_results(job_id):
