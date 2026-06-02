@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BúhoCédula Pro | Validador Profesional Multidisciplinario</title>
+    
+    <!-- Premium Typography & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app" class="glass-bg">
+        <!-- Floating Ambient Glow Elements -->
+        <div class="ambient-glow bg-blue"></div>
+        <div class="ambient-glow bg-purple"></div>
+
+        <!-- Header Navigation -->
+        <header>
+            <nav class="glass-nav">
+                <div class="logo">
+                    <i data-lucide="shield-check" class="icon-brand anim-pulse"></i>
+                    <span>BúhoCédula<span class="text-gradient">Pro</span></span>
+                </div>
+                <div class="nav-status">
+                    <span id="connection-status" class="status-indicator online">
+                        <span class="pulse-dot"></span>
+                        Servidor Activo
+                    </span>
+                </div>
+            </nav>
+        </header>
+
+        <!-- Main Body -->
+        <main class="container">
+            <!-- Hero Title Section -->
+            <section id="hero" class="hero-section text-center">
+                <h1 class="hero-title animate-up">Validador Profesional <span class="text-gradient">Multidisciplinario</span></h1>
+                <p class="hero-subtitle animate-up delay-1">Sube tu archivo Excel, limpia nombres de forma automática, clasifica cédulas por categorías profesionales en tiempo real y descarga resultados ordenados.</p>
+            </section>
+
+            <!-- Main Dashboard Layout -->
+            <div class="dashboard-grid animate-up delay-2">
+                <!-- Left Control Panel -->
+                <div class="left-panel">
+                    <!-- Step 1: Upload Excel -->
+                    <div class="glass-card panel-card" id="card-upload">
+                        <div class="card-header">
+                            <span class="badge-step">1</span>
+                            <h3>Carga de Archivo</h3>
+                        </div>
+                        
+                        <!-- Toggle de Estructuración -->
+                        <div class="struct-toggle-wrapper">
+                            <label class="section-sub-label">Estructura de tu archivo Excel:</label>
+                            <div class="toggle-container">
+                                <button id="btn-struct-yes" class="toggle-btn active" type="button">
+                                    <i data-lucide="table-2"></i>
+                                    <span>Estructurado (3 Columnas)</span>
+                                </button>
+                                <button id="btn-struct-no" class="toggle-btn" type="button">
+                                    <i data-lucide="align-left"></i>
+                                    <span>No Estructurado (1 Columna)</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="drop-zone" class="drop-zone">
+                            <div class="drop-zone-content">
+                                <div class="upload-icon-container">
+                                    <i data-lucide="file-spreadsheet" class="icon-xl"></i>
+                                </div>
+                                <h4>Arrastra tu Excel (.xlsx, .xls)</h4>
+                                <p>O haz clic para explorar tus archivos</p>
+                                <label for="file-input" class="btn-primary select-btn">
+                                    Seleccionar Excel
+                                    <input type="file" id="file-input" accept=".xlsx, .xls" hidden>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="uploaded-file-details" class="file-details hidden">
+                            <i data-lucide="file-check" class="icon-success"></i>
+                            <div class="file-info">
+                                <h5 id="file-name">archivo.xlsx</h5>
+                                <p id="file-meta">0 filas cargadas</p>
+                            </div>
+                            <button id="btn-change-file" class="btn-icon-danger" title="Cambiar archivo">
+                                <i data-lucide="refresh-cw"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Mapping & Cleaning Config -->
+                    <div class="glass-card panel-card disabled" id="card-config">
+                        <div class="card-header">
+                            <span class="badge-step">2</span>
+                            <h3>Mapeo & Configuración</h3>
+                        </div>
+                        
+                        <!-- Mapeo Estructurado (3 Columnas) -->
+                        <div id="mapping-structured">
+                            <div class="form-group">
+                                <label>Nombre/(s)</label>
+                                <select id="select-col-nombre" class="custom-select"></select>
+                            </div>
+                            <div class="form-group-row">
+                                <div class="form-group w-half">
+                                    <label>Apellido Paterno (1)</label>
+                                    <select id="select-col-paterno" class="custom-select"></select>
+                                </div>
+                                <div class="form-group w-half">
+                                    <label>Apellido Materno (2)</label>
+                                    <select id="select-col-materno" class="custom-select"></select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Mapeo No Estructurado (1 Columna Completa) -->
+                        <div id="mapping-unstructured" class="hidden">
+                            <div class="form-group">
+                                <label>Columna de Nombre Completo</label>
+                                <select id="select-col-fullname" class="custom-select"></select>
+                            </div>
+                        </div>
+
+                        <!-- Cleansing Rule Indicators -->
+                        <div class="cleaning-indicators">
+                            <label class="section-sub-label">Reglas de Limpieza Activas:</label>
+                            <div class="rules-grid">
+                                <div class="rule-chip" title="Eliminar espacios de más en los extremos e intermedios"><i data-lucide="check"></i> Trim & Espacios</div>
+                                <div class="rule-chip" title="Transformar letras acentuadas (Á->A, é->e, etc.)"><i data-lucide="check"></i> Quitar Acentos</div>
+                                <div class="rule-chip" title="Se conserva la Ñ para evitar errores de homonimia en México"><i data-lucide="shield-check" class="icon-green"></i> Conservar Ñ</div>
+                                <div class="rule-chip" title="Remover cualquier puntuación o caracter extraño"><i data-lucide="check"></i> Sin Símbolos</div>
+                            </div>
+                        </div>
+
+                        <!-- Supported Professional Categories Panel -->
+                        <div class="keyword-config-container">
+                            <div class="kw-header">
+                                <label class="section-sub-label">Categorías de Clasificación Automática:</label>
+                            </div>
+                            <div class="keyword-chips">
+                                <span class="kw-chip" style="background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.25); color: #34d399; font-weight: 600;">Medicina y Salud</span>
+                                <span class="kw-chip" style="background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.25); color: #a5b4fc; font-weight: 600;">Ingeniería y Tecnología</span>
+                                <span class="kw-chip" style="background: rgba(6, 182, 212, 0.1); border-color: rgba(6, 182, 212, 0.25); color: #67e8f9; font-weight: 600;">Arquitectura y Diseño</span>
+                                <span class="kw-chip" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.25); color: #fbbf24; font-weight: 600;">Derecho y Leyes</span>
+                                <span class="kw-chip" style="background: rgba(168, 85, 247, 0.1); border-color: rgba(168, 85, 247, 0.25); color: #c084fc; font-weight: 600;">Negocios y Finanzas</span>
+                                <span class="kw-chip" style="background: rgba(236, 72, 153, 0.1); border-color: rgba(236, 72, 153, 0.25); color: #f472b6; font-weight: 600;">Educación y Humanidades</span>
+                            </div>
+                        </div>
+
+                        <button id="btn-start-process" class="btn-generate w-full" disabled>
+                            <span>Comenzar Búsqueda Masiva</span>
+                            <i data-lucide="play"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Display & Logging Panel -->
+                <div class="right-panel">
+                    <!-- Original vs Clean Preview Section -->
+                    <div class="glass-card panel-card" id="card-preview">
+                        <div class="card-header">
+                            <i data-lucide="eye" class="header-icon"></i>
+                            <h3>Previsualización de Datos</h3>
+                        </div>
+                        <div class="preview-table-container">
+                            <table id="preview-table" class="preview-table">
+                                <thead>
+                                    <tr>
+                                        <th>Fila</th>
+                                        <th>Nombre Original</th>
+                                        <th>Nombre Limpio (Buscado)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="preview-table-body">
+                                    <tr class="empty-state">
+                                        <td colspan="3">Sube un Excel para ver la limpieza de datos en tiempo real.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Live Terminal Logging Console -->
+                    <div class="glass-card panel-card hidden" id="card-console">
+                        <div class="card-header border-none">
+                            <div class="console-title-group">
+                                <span class="console-dot-green"></span>
+                                <h3>Terminal de Búsqueda</h3>
+                            </div>
+                            <div class="progress-details">
+                                <span id="progress-percent">0%</span>
+                                <span id="progress-count">(0 / 0)</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+                        </div>
+                        <div id="terminal-log" class="terminal-log font-code">
+                            <p class="log-info">[INICIO] Terminal inicializada. Esperando archivo...</p>
+                        </div>
+                        <div class="console-controls">
+                            <button id="btn-pause-process" class="btn-secondary hidden" title="Pausar proceso">
+                                <i data-lucide="pause"></i> Pausar
+                            </button>
+                            <button id="btn-resume-process" class="btn-generate hidden" title="Reanudar proceso">
+                                <i data-lucide="play"></i> Reanudar
+                            </button>
+                            <span id="engine-eta" class="eta-text">ETA: Calculando...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dynamic Results Table Section -->
+            <section id="results-section" class="results-section animate-up delay-3 hidden">
+                <div class="glass-card results-card">
+                    <div class="results-header-actions">
+                        <div class="title-group">
+                            <i data-lucide="file-text" class="icon-brand"></i>
+                            <h2>Cédulas Registradas Encontradas</h2>
+                        </div>
+                        <div class="filters-row">
+                            <div class="search-box">
+                                <i data-lucide="search"></i>
+                                <input type="text" id="input-search-table" placeholder="Filtrar por nombre, cédula o carrera...">
+                            </div>
+                            <div class="filter-dropdown">
+                                <select id="select-filter-status" class="custom-select-sm">
+                                    <option value="ALL">Todos los Resultados</option>
+                                    <option value="MEDICINA Y SALUD">Medicina y Salud</option>
+                                    <option value="INGENIERÍA Y TECNOLOGÍA">Ingeniería y Tecnología</option>
+                                    <option value="ARQUITECTURA Y DISEÑO">Arquitectura y Diseño</option>
+                                    <option value="DERECHO Y LEYES">Derecho y Leyes</option>
+                                    <option value="NEGOCIOS Y FINANZAS">Negocios y Finanzas</option>
+                                    <option value="EDUCACIÓN Y HUMANIDADES">Educación y Humanidades</option>
+                                    <option value="OTRA PROFESIÓN">Otras Profesiones</option>
+                                    <option value="AMBIG">Coincidencias Ambiguas</option>
+                                    <option value="NOT_FOUND">No Encontrados</option>
+                                </select>
+                            </div>
+                            <button id="btn-export-excel" class="btn-primary btn-success-glow" disabled>
+                                <i data-lucide="download"></i>
+                                Exportar Excel Enriquecido
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="results-table-container">
+                        <table id="results-table" class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>ID Cédula</th>
+                                    <th>Nombre Completo Buscado</th>
+                                    <th>Nombre en Cédula</th>
+                                    <th>Cédula</th>
+                                    <th>Carrera / Especialidad</th>
+                                    <th>Universidad / Estado / Año</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-table-body">
+                                <tr class="empty-state">
+                                    <td colspan="6">Las coincidencias encontradas en la SEP aparecerán aquí en tiempo real.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer Section -->
+        <footer class="glass-footer">
+            <p>&copy; 2026 BúhoCédula Pro. Diseñado con Glassmorphism para máxima excelencia operacional.</p>
+        </footer>
+
+        <!-- Modal: Edit Keywords List -->
+        <div id="modal-keywords" class="modal-overlay hidden">
+            <div class="glass-card modal-content animate-zoom">
+                <div class="modal-header">
+                    <h3>Configurar Palabras Clave Médicas</h3>
+                    <button id="btn-close-keywords" class="btn-close"><i data-lucide="x"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-desc">Todas las cédulas cuyas carreras contengan estas palabras clave serán clasificadas como **Área Médica / Salud**. Sepáralas por comas.</p>
+                    <textarea id="textarea-keywords" class="custom-textarea" rows="6"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button id="btn-cancel-keywords" class="btn-secondary">Cancelar</button>
+                    <button id="btn-save-keywords" class="btn-primary">Guardar Palabras Clave</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Captcha Detección Híbrida -->
+        <div id="modal-captcha" class="modal-overlay hidden">
+            <div class="glass-card modal-content modal-lg animate-zoom">
+                <div class="modal-header border-red">
+                    <i data-lucide="alert-triangle" class="icon-danger icon-xl anim-bounce"></i>
+                    <h3>¡Validación o Sesión Expirada Detectada!</h3>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-desc">El portal o servidor ha requerido validación de conexión humana. Para continuar de manera segura sin perder el progreso de tu Excel, sigue estos pasos:</p>
+                    
+                    <div class="captcha-steps">
+                        <div class="step-item">
+                            <span class="step-num">1</span>
+                            <div class="step-text">
+                                <strong>Abre el portal oficial de la SEP:</strong>
+                                <p>Haz clic en el botón de abajo para abrir la página en tu navegador actual de uso diario.</p>
+                                <a href="https://cedulaprofesional.sep.gob.mx/" target="_blank" class="btn-secondary btn-sm inline-btn" id="btn-open-buho">
+                                    Abrir Registro SEP <i data-lucide="external-link"></i>
+                                </a>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <span class="step-num">2</span>
+                            <div class="step-text">
+                                <strong>Resuelve la validación:</strong>
+                                <p>Realiza una búsqueda de prueba manual en el Portal de la SEP si es necesario.</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <span class="step-num">3</span>
+                            <div class="step-text">
+                                <strong>Copia y pega la cadena de cookies:</strong>
+                                <p>Abre herramientas de desarrollador (F12) en el Portal SEP, ve a Network, busca los encabezados (Headers), copia el contenido de la cabecera Cookie o Token de sesión y pégalo abajo si se requiere.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group mt-3">
+                        <label>Cadena de Cookie Copiada (Completa):</label>
+                        <textarea id="textarea-cookies" class="custom-textarea font-code" rows="4" placeholder="E.g. token=ey...; cookie=..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <p id="captcha-error-msg" class="error-msg-inline hidden">Por favor ingresa un token válido de cookies.</p>
+                    <button id="btn-submit-cookies" class="btn-primary btn-success-glow">
+                        <span>Actualizar Sesión y Reanudar</span>
+                        <i data-lucide="check-circle"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JS Logic -->
+    <script src="main.js"></script>
+    <script>
+        // Start Lucide Icons dynamically
+        lucide.createIcons();
+    </script>
+</body>
+</html>

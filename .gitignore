@@ -1,0 +1,38 @@
+# Entorno Virtual de Python
+.venv/
+venv/
+ENV/
+env/
+Active.activate
+*.lnk
+
+# Caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Archivos del Sistema Operativo y de Editores
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Archivos Excel y reportes locales de prueba (para evitar subir datos privados)
+*.xlsx
+*.xls
+*.csv
+reporte_cedulas_*.xlsx
+Reporte_Cedulas_Oficiales_*.xlsx
+
+# Archivos temporales de extracción o depuración
+scratch/
+extracted_data.json
+extracted_data_full.json
+sep_page.html
+search_result.html
+*.png
+*.pdf
