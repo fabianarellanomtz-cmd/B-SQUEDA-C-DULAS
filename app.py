@@ -1,3 +1,4 @@
+import sys
 import os
 import io
 import re
@@ -9,8 +10,16 @@ from flask import Flask, render_template, request, jsonify, Response, send_file,
 import pandas as pd
 from bs4 import BeautifulSoup
 import requests
+import webbrowser
+from threading import Timer
 
-app = Flask(__name__, static_folder=".", static_url_path="", template_folder=".")
+# Resolve bundle base directory for PyInstaller standalone executables
+if getattr(sys, 'frozen', False):
+    base_dir = sys._MEIPASS
+else:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+app = Flask(__name__, static_folder=base_dir, static_url_path="", template_folder=base_dir)
 app.secret_key = "buho_cedula_secret_key_2026"
 
 # Global session/memory storage for active job data
@@ -978,24 +987,52 @@ def simulate_payment():
         
     job = ACTIVE_JOBS[job_id]
     job["paid"] = True
-    return jsonify({"success": True, "message": "Pago aprobado con éxito. Búsqueda desbloqueada."})
+    return jsonify({"success": True})
 
-@app.route("/api/process/<job_id>")
-def process_job(job_id):
+@app.route("/api/job_status/<job_id>", methods=["GET"])
+def job_status(job_id):
     if job_id not in ACTIVE_JOBS:
-        return Response("event: error\ndata: Task not found\n\n", mimetype="text/event-stream")
-
+        return jsonify({"status": "not_found"}), 404
     job = ACTIVE_JOBS[job_id]
+    return jsonify({
+        "job_id": job_id,
+        "status": job["status"],
+        "total_rows": len(job["records"]),
+        "current_index": job["current_index"],
+        "amount_mxn": job["amount_mxn"],
+        "authorized": job["authorized"],
+        "paid": job["paid"],
+        "structured": job.get("structured", True),
+        "columns": job.get("columns", []),
+        "mapped": job.get("mapped", {})
+    })
+
+@app.route("/api/pause/<job_id>", methods=["POST"])
+def pause_job(job_id):
+    if job_id not in ACTIVE_JOBS:
+        return jsonify({"error": "ID de tarea inválido o expirado."}), 404
+    job = ACTIVE_JOBS[job_id]
+    job["status"] = "paused"
+    return jsonify({"success": True, "message": "Tarea pausada correctamente en el servidor."})
+
+@app.route("/api/resume/<job_id>", methods=["POST"])
+def resume_job(job_id):
+    if job_id not in ACTIVE_JOBS:
+        return jsonify({"error": "ID de tarea inválido o expirado."}), 404
+    job = ACTIVE_JOBS[job_id]
+    if job["status"] == "completed":
+        return jsonify({"error": "La tarea ya está completada."}), 400
+    job["status"] = "processing"
+    return jsonify({"success": True, "message": "Tarea reanudada en el servidor."})
+
+def background_worker(job_id):
+    job = ACTIVE_JOBS.get(job_id)
+    if not job:
+        return
+        
     records = job["records"]
     mapped = job["mapped"]
-    amount_mxn = job.get("amount_mxn", 0.0)
-    
-    # Strict backend billing check
-    if amount_mxn > 0.0 and not job.get("authorized") and not job.get("paid"):
-        def billing_error_stream():
-            error_data = {"status": "billing_required_error", "message": "Se requiere pago para procesar más de 10 registros."}
-            yield f"data: {json.dumps(error_data)}\n\n"
-        return Response(billing_error_stream(), mimetype="text/event-stream")
+    results_accumulated = job["results"]
     
     PREFIX_MAP = {
         "MEDICINA Y SALUD": "MED",
@@ -1006,66 +1043,115 @@ def process_job(job_id):
         "EDUCACIÓN Y HUMANIDADES": "EDU",
         "OTRA PROFESIÓN": "GEN"
     }
-
-    def event_stream():
-        yield f"data: {json.dumps({'status': 'start', 'total': len(records)})}\n\n"
+    
+    idx = job["current_index"]
+    
+    # Send start event if not already present
+    if not job["stream_events"]:
+        job["stream_events"].append({'status': 'start', 'total': len(records)})
         
-        idx = job["current_index"]
-        results_accumulated = job["results"]
+    while idx < len(records):
+        # Check if the job was paused or stopped
+        if job.get("status") == "paused":
+            job["background_thread_active"] = False
+            return
+            
+        row = records[idx]
+        job["current_index"] = idx
         
-        while idx < len(records):
-            row = records[idx]
-            job["current_index"] = idx
+        structured = job.get("structured", True)
+        
+        if structured:
+            n_val = str(row.get(mapped["nombre"], "")) if mapped["nombre"] else ""
+            p_val = str(row.get(mapped["paterno"], "")) if mapped["paterno"] else ""
+            m_val = str(row.get(mapped["materno"], "")) if mapped["materno"] else ""
             
-            structured = job.get("structured", True)
+            searched_name_raw = re.sub(r'\s+', ' ', f"{n_val} {p_val} {m_val}").strip()
             
-            if structured:
-                n_val = str(row.get(mapped["nombre"], "")) if mapped["nombre"] else ""
-                p_val = str(row.get(mapped["paterno"], "")) if mapped["paterno"] else ""
-                m_val = str(row.get(mapped["materno"], "")) if mapped["materno"] else ""
-                
-                searched_name_raw = re.sub(r'\s+', ' ', f"{n_val} {p_val} {m_val}").strip()
-                
-                n_clean = clean_name_text(n_val)
-                p_clean = clean_name_text(p_val)
-                m_clean = clean_name_text(m_val)
-            else:
-                full_name_val = str(row.get(mapped["nombre"], "")) if mapped["nombre"] else ""
-                searched_name_raw = re.sub(r'\s+', ' ', full_name_val).strip()
-                
-                split_names, split_paterno, split_materno = split_full_name(full_name_val)
-                
-                n_clean = clean_name_text(split_names)
-                p_clean = clean_name_text(split_paterno)
-                m_clean = clean_name_text(split_materno)
+            n_clean = clean_name_text(n_val)
+            p_clean = clean_name_text(p_val)
+            m_clean = clean_name_text(m_val)
+        else:
+            full_name_val = str(row.get(mapped["nombre"], "")) if mapped["nombre"] else ""
+            searched_name_raw = re.sub(r'\s+', ' ', full_name_val).strip()
             
-            # Keep-alive heartbeat to reset Render 30s idle timeout before blocking call
-            yield ": keepalive\n\n"
+            split_names, split_paterno, split_materno = split_full_name(full_name_val)
             
-            # Update live logger
-            yield f"data: {json.dumps({'status': 'searching', 'index': idx + 1, 'name': searched_name_raw})}\n\n"
+            n_clean = clean_name_text(split_names)
+            p_clean = clean_name_text(split_paterno)
+            m_clean = clean_name_text(split_materno)
             
-            # Query BuhoLegal
-            response = query_buholegal(n_clean, p_clean, m_clean, session_cookies=job["session_cookies"])
+        # Log searching status in stream
+        job["stream_events"].append({'status': 'searching', 'index': idx + 1, 'name': searched_name_raw})
+        
+        # Query SEP API
+        response = query_buholegal(n_clean, p_clean, m_clean, session_cookies=job["session_cookies"])
+        
+        if response["status"] == "captcha_required":
+            if "cookies" in response:
+                job["session_cookies"].update(response["cookies"])
+            job["stream_events"].append({'status': 'captcha_required', 'index': idx + 1})
+            job["status"] = "paused"
+            job["background_thread_active"] = False
+            return
             
-            if response["status"] == "captcha_required":
-                # Save session cookies and pause
-                if "cookies" in response:
-                    job["session_cookies"].update(response["cookies"])
-                yield f"data: {json.dumps({'status': 'captcha_required', 'index': idx + 1})}\n\n"
-                return  # Terminate SSE stream, client will resume later
+        elif response["status"] == "error":
+            error_msg = response.get("message", "Error de red.")
+            job["stream_events"].append({'status': 'row_error', 'index': idx + 1, 'error': error_msg})
+            
+            results_accumulated.append({
+                "original_row": row,
+                "searched_name": searched_name_raw,
+                "estatus": f"Error de consulta ({error_msg})",
+                "id_resultado": "ERROR",
+                "cedula": "",
+                "tipo": "NOT_FOUND",
+                "nombre_cedula": "",
+                "nombre_sep": "",
+                "paterno_sep": "",
+                "materno_sep": "",
+                "carrera": "",
+                "universidad": "",
+                "estado": "",
+                "ano": "",
+                "categoria": "OTRA PROFESIÓN",
+                "ambigua": "No",
+                "motivo_ambiguedad": ""
+            })
+            
+            # Append NOT_FOUND equivalent for frontend processed log
+            job["stream_events"].append({
+                'status': 'row_processed', 
+                'index': idx + 1, 
+                'found': 0, 
+                'name': searched_name_raw, 
+                'results': []
+            })
+            
+        else:
+            if "cookies" in response:
+                job["session_cookies"].update(response["cookies"])
                 
-            elif response["status"] == "error":
-                # Log error but continue
-                error_msg = response.get("message", "Error de red.")
-                yield f"data: {json.dumps({'status': 'row_error', 'index': idx + 1, 'error': error_msg})}\n\n"
-                
-                # Append row as non-found error
+            buho_rows = response.get("results", [])
+            is_autocorrected = False
+            
+            if not buho_rows:
+                candidates = autocorrect_name_parts(n_clean, p_clean, m_clean)
+                for n_corr, p_corr, m_corr in candidates:
+                    resp_corr = query_buholegal(n_corr, p_corr, m_corr, session_cookies=job["session_cookies"])
+                    if resp_corr["status"] == "success" and resp_corr.get("results", []):
+                        buho_rows = resp_corr["results"]
+                        is_autocorrected = True
+                        if "cookies" in resp_corr:
+                            job["session_cookies"].update(resp_corr["cookies"])
+                        break
+                        
+            if not buho_rows:
                 results_accumulated.append({
                     "original_row": row,
                     "searched_name": searched_name_raw,
-                    "estatus": f"Error de consulta ({error_msg})",
-                    "id_resultado": "ERROR",
+                    "estatus": "No Encontrado (Sin registro en la SEP)",
+                    "id_resultado": "N/A",
                     "cedula": "",
                     "tipo": "NOT_FOUND",
                     "nombre_cedula": "",
@@ -1080,124 +1166,128 @@ def process_job(job_id):
                     "ambigua": "No",
                     "motivo_ambiguedad": ""
                 })
-                
+                job["stream_events"].append({
+                    'status': 'row_processed', 
+                    'index': idx + 1, 
+                    'found': 0, 
+                    'name': searched_name_raw, 
+                    'results': []
+                })
             else:
-                if "cookies" in response:
-                    job["session_cookies"].update(response["cookies"])
+                ambiguity_report = analyze_ambiguity(buho_rows, searched_name_raw, None)
+                
+                def get_year_key(x):
+                    y = x.get("ano", "0")
+                    return int(y) if str(y).isdigit() else 0
                     
-                buho_rows = response.get("results", [])
-                is_autocorrected = False
+                buho_rows.sort(key=lambda x: (x["nombre_completo"], get_year_key(x)))
                 
-                if not buho_rows:
-                    # Try local spelling corrections as fallback candidates
-                    candidates = autocorrect_name_parts(n_clean, p_clean, m_clean)
-                    for n_corr, p_corr, m_corr in candidates:
-                        resp_corr = query_buholegal(n_corr, p_corr, m_corr, session_cookies=job["session_cookies"])
-                        if resp_corr["status"] == "success" and resp_corr.get("results", []):
-                            buho_rows = resp_corr["results"]
-                            is_autocorrected = True
-                            if "cookies" in resp_corr:
-                                job["session_cookies"].update(resp_corr["cookies"])
-                            break
-                
-                if not buho_rows:
-                    # No records found at all (even after spelling fallback checks)
+                processed_results = []
+                for r in buho_rows:
+                    cat = classify_career(r["carrera"])
+                    r["categoria"] = cat
+                    
+                    rep = ambiguity_report.get(r["cedula"], {"ambigua": "No", "motivo": ""})
+                    r["ambigua"] = rep["ambigua"]
+                    r["motivo_ambiguedad"] = rep["motivo"]
+                    
+                    prefix = PREFIX_MAP.get(cat, "GEN")
+                    id_res = f"{prefix}-{job_id[-4:]}-{len(results_accumulated)+1:04d}"
+                    
                     results_accumulated.append({
                         "original_row": row,
                         "searched_name": searched_name_raw,
-                        "estatus": "No Encontrado (Sin registro en la SEP)",
-                        "id_resultado": "N/A",
-                        "cedula": "",
-                        "tipo": "NOT_FOUND",
-                        "nombre_cedula": "",
-                        "nombre_sep": "",
-                        "paterno_sep": "",
-                        "materno_sep": "",
-                        "carrera": "",
-                        "universidad": "",
-                        "estado": "",
-                        "ano": "",
-                        "categoria": "OTRA PROFESIÓN",
-                        "ambigua": "No",
-                        "motivo_ambiguedad": ""
+                        "estatus": "Cédula Encontrada (Corregido)" if is_autocorrected else "Cédula Encontrada",
+                        "id_resultado": id_res,
+                        "cedula": r["cedula"],
+                        "tipo": prefix,
+                        "nombre_cedula": r["nombre_completo"],
+                        "nombre_sep": r.get("nombre_sep", ""),
+                        "paterno_sep": r.get("paterno_sep", ""),
+                        "materno_sep": r.get("materno_sep", ""),
+                        "carrera": r["carrera"],
+                        "universidad": r["universidad"],
+                        "estado": r["estado"],
+                        "ano": r["ano"],
+                        "categoria": cat,
+                        "ambigua": r["ambigua"],
+                        "motivo_ambiguedad": r["motivo_ambiguedad"]
                     })
-                    yield f"data: {json.dumps({'status': 'row_processed', 'index': idx + 1, 'found': 0, 'name': searched_name_raw, 'results': []})}\n\n"
-                else:
-                    # Analyze ambiguity across all records
-                    ambiguity_report = analyze_ambiguity(buho_rows, searched_name_raw, None)
                     
-                    # Sort records alphabetically by name and then chronologically by year safely
-                    def get_year_key(x):
-                        y = x.get("ano", "0")
-                        return int(y) if str(y).isdigit() else 0
+                    processed_results.append({
+                        "id": id_res,
+                        "cedula": r["cedula"],
+                        "nombre": r["nombre_completo"],
+                        "carrera": r["carrera"],
+                        "universidad": r["universidad"],
+                        "estado": r["estado"],
+                        "ano": r["ano"],
+                        "categoria": cat,
+                        "ambigua": r["ambigua"],
+                        "motivo": r["motivo_ambiguedad"]
+                    })
                     
-                    buho_rows.sort(key=lambda x: (x["nombre_completo"], get_year_key(x)))
-                    
-                    processed_results = []
-                    for r in buho_rows:
-                        # Classify the career into our 7 categories
-                        cat = classify_career(r["carrera"])
-                        r["categoria"] = cat
-                        
-                        # Get from ambiguity analyzer
-                        rep = ambiguity_report.get(r["cedula"], {"ambigua": "No", "motivo": ""})
-                        r["ambigua"] = rep["ambigua"]
-                        r["motivo_ambiguedad"] = rep["motivo"]
-                        
-                        # ID format prefix can be category specific (MED, TEC, ARQ, DER, NEG, EDU, GEN)
-                        prefix = PREFIX_MAP.get(cat, "GEN")
-                        id_res = f"{prefix}-{job_id[-4:]}-{len(results_accumulated)+1:04d}"
-                        
-                        results_accumulated.append({
-                            "original_row": row,
-                            "searched_name": searched_name_raw,
-                            "estatus": "Cédula Encontrada (Corregido)" if is_autocorrected else "Cédula Encontrada",
-                            "id_resultado": id_res,
-                            "cedula": r["cedula"],
-                            "tipo": prefix,
-                            "nombre_cedula": r["nombre_completo"],
-                            "nombre_sep": r.get("nombre_sep", ""),
-                            "paterno_sep": r.get("paterno_sep", ""),
-                            "materno_sep": r.get("materno_sep", ""),
-                            "carrera": r["carrera"],
-                            "universidad": r["universidad"],
-                            "estado": r["estado"],
-                            "ano": r["ano"],
-                            "categoria": cat,
-                            "ambigua": r["ambigua"],
-                            "motivo_ambiguedad": r["motivo_ambiguedad"]
-                        })
-                        
-                        processed_results.append({
-                            "id": id_res,
-                            "cedula": r["cedula"],
-                            "nombre": r["nombre_completo"],
-                            "carrera": r["carrera"],
-                            "universidad": r["universidad"],
-                            "estado": r["estado"],
-                            "ano": r["ano"],
-                            "categoria": cat,
-                            "ambigua": r["ambigua"],
-                            "motivo": r["motivo_ambiguedad"]
-                        })
-                        
-                    yield f"data: {json.dumps({
-                        'status': 'row_processed', 
-                        'index': idx + 1, 
-                        'found': len(buho_rows), 
-                        'name': searched_name_raw,
-                        'results': processed_results
-                    })}\n\n"
+                job["stream_events"].append({
+                    'status': 'row_processed', 
+                    'index': idx + 1, 
+                    'found': len(buho_rows), 
+                    'name': searched_name_raw, 
+                    'results': processed_results
+                })
+                
+        idx += 1
+        job["current_index"] = idx
+        # Natural delay between queries to respect anti-bot
+        time.sleep(random.uniform(1.2, 2.5))
+        
+    # Complete job!
+    job["status"] = "completed"
+    job["current_index"] = len(records)
+    job["stream_events"].append({'status': 'completed', 'total_processed': len(records)})
+    job["background_thread_active"] = False
 
-            idx += 1
-            # Slower natural pacing to avoid triggering rate-limiting / IP bans on the SEP API
-            time.sleep(random.uniform(1.2, 2.5))
+@app.route("/api/process/<job_id>")
+def process_job(job_id):
+    if job_id not in ACTIVE_JOBS:
+        return Response("event: error\ndata: Task not found\n\n", mimetype="text/event-stream")
 
-        # Job complete!
-        job["status"] = "completed"
-        job["current_index"] = len(records)
-        yield f"data: {json.dumps({'status': 'completed', 'total_processed': len(records)})}\n\n"
-
+    job = ACTIVE_JOBS[job_id]
+    amount_mxn = job.get("amount_mxn", 0.0)
+    
+    # Strict backend billing check
+    if amount_mxn > 0.0 and not job.get("authorized") and not job.get("paid"):
+        def billing_error_stream():
+            error_data = {"status": "billing_required_error", "message": "Se requiere pago para procesar más de 10 registros."}
+            yield f"data: {json.dumps(error_data)}\n\n"
+        return Response(billing_error_stream(), mimetype="text/event-stream")
+        
+    # Initialize stream events queue in job dictionary
+    if "stream_events" not in job:
+        job["stream_events"] = []
+        
+    # Start the asynchronous python thread if not already running and not explicitly paused
+    if not job.get("background_thread_active") and job["status"] in ["pending", "processing"]:
+        job["background_thread_active"] = True
+        job["status"] = "processing"
+        
+        thread = threading.Thread(target=background_worker, args=(job_id,))
+        thread.daemon = True
+        thread.start()
+        
+    def event_stream():
+        client_event_idx = 0
+        while True:
+            if client_event_idx < len(job["stream_events"]):
+                event_data = job["stream_events"][client_event_idx]
+                yield f"data: {json.dumps(event_data)}\n\n"
+                client_event_idx += 1
+                if event_data.get("status") in ["completed", "captcha_required"]:
+                    break
+            else:
+                # Yield keepalive heartbeat to reset connection timeouts
+                yield ": keepalive\n\n"
+                time.sleep(0.5)
+                
     resp = Response(event_stream(), mimetype="text/event-stream")
     resp.headers["X-Accel-Buffering"] = "no"
     resp.headers["Cache-Control"] = "no-cache"
@@ -1274,9 +1364,23 @@ def download_results(job_id):
     except Exception as e:
         return jsonify({"error": f"Error al generar Excel: {str(e)}"}), 500
 
+def open_browser():
+    try:
+        webbrowser.open_new("http://127.0.0.1:5050")
+    except Exception as e:
+        print("Error opening browser automatically:", str(e))
+
 if __name__ == "__main__":
-    # Pre-fetch working proxy on startup for cloud environments
-    prefetch_mexico_proxy_async()
-    
+    # Pre-fetch working proxy on startup for cloud environments (only if on Render)
+    if os.environ.get("RENDER") or os.environ.get("PORT"):
+        prefetch_mexico_proxy_async()
+        
     print("Iniciando BúhoCédula Pro en puerto 5050...")
-    app.run(host="127.0.0.1", port=5050, debug=True)
+    
+    # Automatically open local browser window for offline desktop users
+    if not os.environ.get("RENDER") and not os.environ.get("PORT"):
+        Timer(1.5, open_browser).start()
+        
+    # Disable debug mode when compiled into .exe to prevent multiple browser tabs or crashes
+    debug_mode = not getattr(sys, 'frozen', False)
+    app.run(host="127.0.0.1", port=5050, debug=debug_mode)

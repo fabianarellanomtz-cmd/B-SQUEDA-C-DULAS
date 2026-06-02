@@ -101,6 +101,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Automatic classification active
     initModals();
     initTableFilters();
+    checkActiveJobOnLoad();
 });
 
 // Drag & Drop
@@ -249,6 +250,7 @@ function resetToUploadState() {
     fileInput.value = "";
     currentJobId = null;
     totalRecords = 0;
+    localStorage.removeItem("currentJobId");
     
     // Billing states reset
     amountMxn = 0.0;
@@ -664,13 +666,22 @@ btnStartProcess.addEventListener("click", () => {
 });
 
 function startScrapingProcess() {
-    isProcessing = true;
-    appendLog(`[PROCESO] Iniciando consultas masivas en la API Oficial de la SEP. ETA aproximado: ${Math.round(totalRecords * 2.2)}s`, "info");
+    if (!currentJobId) return;
     
+    // Save job ID in localStorage to allow recovery if tab is closed or reloaded
+    localStorage.setItem("currentJobId", currentJobId);
+
     // Disable file switching during run
     btnChangeFile.setAttribute("disabled", "true");
-    btnPauseProcess.classList.remove("hidden");
-    btnResumeProcess.classList.add("hidden");
+    
+    // Set UI state according to isProcessing
+    if (isProcessing) {
+        btnPauseProcess.classList.remove("hidden");
+        btnResumeProcess.classList.add("hidden");
+    } else {
+        btnPauseProcess.classList.add("hidden");
+        btnResumeProcess.classList.remove("hidden");
+    }
 
     // Establish Server-Sent Events source
     activeEventSource = new EventSource(`/api/process/${currentJobId}`);
@@ -679,13 +690,17 @@ function startScrapingProcess() {
         const data = JSON.parse(event.data);
 
         if (data.status === "start") {
-            appendLog(`[PROCESO] Conexión establecida. Iniciando ${data.total} búsquedas...`, "info");
+            appendLog(`[SISTEMA] Canal de comunicación establecido. Sincronizando búsquedas...`, "info");
+            // Clear table and store to avoid duplicates on replay/reconnect
+            resultsStore = [];
+            resultsTableBody.innerHTML = "";
+            processedCount = 0;
             updateProgress(0, data.total);
         }
         
         else if (data.status === "searching") {
             reconnectAttempts = 0;
-            appendLog(`[BUSCANDO] Fila ${data.index}/${totalRecords}: "${data.name}"`, "info");
+            appendLog(`[BÚSQUEDA] Fila ${data.index}/${totalRecords}: "${data.name}"`, "info");
         }
         
         else if (data.status === "row_processed") {
@@ -709,8 +724,11 @@ function startScrapingProcess() {
                         ambigua: res.ambigua,
                         motivo: res.motivo
                     };
-                    resultsStore.push(rowData);
-                    addResultRowToTable(rowData);
+                    // Prevent duplicates in resultsStore just in case
+                    if (!resultsStore.some(item => item.cedula === res.cedula && item.cedula !== "-")) {
+                        resultsStore.push(rowData);
+                        addResultRowToTable(rowData);
+                    }
                 });
             } else {
                 appendLog(logMsg + ` (Sin registros)`, "info");
@@ -741,7 +759,9 @@ function startScrapingProcess() {
         
         else if (data.status === "completed") {
             isProcessing = false;
-            activeEventSource.close();
+            if (activeEventSource) {
+                activeEventSource.close();
+            }
             appendLog(`[COMPLETADO] ¡Búsqueda finalizada con éxito! Total procesados: ${data.total_processed}.`, "success");
             
             // Enable download Excel
@@ -755,7 +775,10 @@ function startScrapingProcess() {
             engineEta.textContent = "Proceso terminado con éxito";
             
             // Flash ambient glow
-            document.querySelector(".ambient-glow.bg-blue").style.background = "radial-gradient(circle, var(--success) 0%, transparent 70%)";
+            const glow = document.querySelector(".ambient-glow.bg-blue");
+            if (glow) {
+                glow.style.background = "radial-gradient(circle, var(--success) 0%, transparent 70%)";
+            }
         }
     };
 
@@ -764,18 +787,19 @@ function startScrapingProcess() {
             activeEventSource.close();
         }
         
-        if (isProcessing && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        // If the process is still marked as active, reconnect indefinitely (resilience to tab suspension)
+        if (isProcessing) {
             reconnectAttempts++;
-            appendLog(`[CONEXION] Conexión interrumpida en fila ${processedCount}/${totalRecords}. Re-intentando reconexión automática (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) en 3 segundos...`, "warning");
+            const backoff = Math.min(3000 + (reconnectAttempts * 1000), 10000);
+            appendLog(`[CONEXIÓN] Canal de comunicación interrumpido. Re-conectando en segundo plano en ${Math.round(backoff/1000)}s... (Intento ${reconnectAttempts})`, "warning");
             
             setTimeout(() => {
                 if (isProcessing) {
                     startScrapingProcess();
                 }
-            }, 3000);
+            }, backoff);
         } else {
-            appendLog(`[CONEXION] Error de transmisión Server-Sent Events o conexión de red interrumpida.`, "error");
-            pauseScrapingProcess(false);
+            appendLog(`[CONEXIÓN] Canal de comunicación cerrado.`, "info");
         }
     };
 }
@@ -785,10 +809,25 @@ function pauseScrapingProcess(showCaptchaModal = false) {
         activeEventSource.close();
     }
     isProcessing = false;
-    appendLog(`[PAUSA] Consultas pausadas temporalmente en la fila ${processedCount}/${totalRecords}.`, "warning");
     
     btnPauseProcess.classList.add("hidden");
     btnResumeProcess.classList.remove("hidden");
+    
+    if (currentJobId) {
+        appendLog(`[PROCESO] Enviando señal de pausa al servidor...`, "info");
+        fetch(`/api/pause/${currentJobId}`, { method: "POST" })
+        .then(res => {
+            if (!res.ok) throw new Error("Error en servidor al pausar.");
+            return res.json();
+        })
+        .then(() => {
+            appendLog(`[PAUSA] Consultas pausadas temporalmente en la fila ${processedCount}/${totalRecords}.`, "warning");
+        })
+        .catch(err => {
+            console.error("Error al pausar en servidor:", err);
+            appendLog(`[PAUSA] Consultas pausadas localmente, pero falló señal al servidor: ${err.message}`, "warning");
+        });
+    }
 
     if (showCaptchaModal) {
         modalCaptcha.classList.remove("hidden");
@@ -796,7 +835,24 @@ function pauseScrapingProcess(showCaptchaModal = false) {
 }
 
 function resumeScrapingProcess() {
-    startScrapingProcess();
+    if (!currentJobId) return;
+    
+    appendLog(`[PROCESO] Enviando señal de reanudación al servidor...`, "info");
+    
+    fetch(`/api/resume/${currentJobId}`, { method: "POST" })
+    .then(res => {
+        if (!res.ok) throw new Error("No se pudo reanudar en el servidor.");
+        return res.json();
+    })
+    .then(() => {
+        isProcessing = true;
+        reconnectAttempts = 0;
+        appendLog(`[PROCESO] Reanudando consultas masivas en el servidor...`, "info");
+        startScrapingProcess();
+    })
+    .catch(err => {
+        appendLog(`[ERROR] No se pudo reanudar el proceso: ${err.message}`, "error");
+    });
 }
 
 btnPauseProcess.addEventListener("click", () => pauseScrapingProcess(false));
@@ -959,4 +1015,94 @@ btnExportExcel.addEventListener("click", () => {
     
     // Redirect to download endpoint
     window.location.href = `/api/download/${currentJobId}`;
+});
+
+// recovery of active jobs
+function checkActiveJobOnLoad() {
+    const savedJobId = localStorage.getItem("currentJobId");
+    if (!savedJobId) return;
+
+    appendLog(`[SISTEMA] Buscando tarea activa previa en el servidor: ${savedJobId}...`, "info");
+
+    fetch(`/api/job_status/${savedJobId}`)
+    .then(res => {
+        if (!res.ok) throw new Error("No se encontró la tarea o expiró.");
+        return res.json();
+    })
+    .then(data => {
+        currentJobId = data.job_id;
+        totalRecords = data.total_rows;
+        amountMxn = data.amount_mxn;
+        isPaid = data.paid;
+        isAuthorized = data.authorized;
+        isStructured = data.structured;
+
+        // Restore file info view
+        fileNameDisp.textContent = `Tarea recuperada (${currentJobId})`;
+        fileMetaDisp.textContent = `${totalRecords} filas en esta consulta`;
+        dropZone.classList.add("hidden");
+        uploadedDetails.classList.remove("hidden");
+
+        // Set structure buttons visual states
+        if (isStructured) {
+            btnStructYes.classList.add("active");
+            btnStructNo.classList.remove("active");
+            mappingStructured.classList.remove("hidden");
+            mappingUnstructured.classList.add("hidden");
+        } else {
+            btnStructYes.classList.remove("active");
+            btnStructNo.classList.add("active");
+            mappingStructured.classList.add("hidden");
+            mappingUnstructured.classList.remove("hidden");
+        }
+
+        // Populate dynamic mapping selectors with placeholder since columns are saved
+        if (data.columns && data.columns.length > 0) {
+            populateSelectors(data.columns, data.mapped);
+        }
+
+        // Enable configs card visually, evaluate billing
+        cardConfig.classList.remove("disabled");
+        evaluatePaymentStatus();
+
+        // Restore console and results sections
+        cardConsole.classList.remove("hidden");
+        resultsSection.classList.remove("hidden");
+
+        // Synchronize and render current status
+        if (data.status === "processing") {
+            isProcessing = true;
+            appendLog(`[SISTEMA] Sincronizando tarea activa en ejecución...`, "success");
+            startScrapingProcess();
+        } else if (data.status === "completed") {
+            isProcessing = false;
+            appendLog(`[SISTEMA] Tarea finalizada encontrada. Recuperando resultados...`, "success");
+            startScrapingProcess();
+        } else {
+            isProcessing = false;
+            btnPauseProcess.classList.add("hidden");
+            btnResumeProcess.classList.remove("hidden");
+            appendLog(`[SISTEMA] Tarea pausada encontrada. Haz clic en "Reanudar" para continuar.`, "warning");
+            // Pull the results processed so far by connecting to the stream once
+            startScrapingProcess();
+        }
+    })
+    .catch(err => {
+        console.warn("No active job to restore:", err.message);
+        localStorage.removeItem("currentJobId");
+    });
+}
+
+// Monitor page visibility to instantly sync when returning to the tab
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        if (isProcessing && currentJobId) {
+            // Check if connection is currently closed or missing
+            if (!activeEventSource || activeEventSource.readyState === EventSource.CLOSED) {
+                appendLog(`[PAGINA] Aplicación visible. Re-sincronizando progreso con el servidor...`, "info");
+                reconnectAttempts = 0;
+                startScrapingProcess();
+            }
+        }
+    }
 });
