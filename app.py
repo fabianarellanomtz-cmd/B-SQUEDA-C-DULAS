@@ -366,33 +366,90 @@ DYNAMIC_MEXICO_PROXY = {"proxy_url": None, "last_tested": 0}
 
 def fetch_free_mexico_proxies():
     """
-    Fetches a list of free HTTP/HTTPS proxies in Mexico from ProxyScrape and other public providers.
+    Fetches a list of free HTTP, SOCKS4 and SOCKS5 proxies in Mexico in real-time
+    from multiple highly-reliable public sources.
+    Returns: list of (ip_port, proto)
     """
-    urls = [
-        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country=MX&ssl=all&anonymity=all",
-        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=https&timeout=5000&country=MX&ssl=all&anonymity=all"
-    ]
-    proxies = []
-    for url in urls:
+    candidates = []
+    
+    # 1. Proxyscrape v4 (Text-based, returns protocol://ip:port)
+    url_ps4 = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text&country=mx"
+    try:
+        resp = requests.get(url_ps4, timeout=5)
+        if resp.status_code == 200:
+            for line in resp.text.splitlines():
+                line = line.strip()
+                if line and "://" in line:
+                    parts = line.split("://")
+                    if len(parts) == 2:
+                        proto, ip_port = parts
+                        candidates.append((ip_port, proto.lower()))
+    except Exception as e:
+        print("[PROXY] Error fetching from Proxyscrape v4:", str(e))
+
+    # 2. Geonode API (JSON-based, very rich list)
+    url_geonode = "https://proxylist.geonode.com/api/proxy-list?limit=150&page=1&sort_by=lastChecked&sort_type=desc&country=MX"
+    try:
+        resp = requests.get(url_geonode, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            for p in data.get("data", []):
+                ip = p.get("ip")
+                port = p.get("port")
+                protocols = p.get("protocols", [])
+                if ip and port and protocols:
+                    # Choose best protocol
+                    proto = "http"
+                    if "socks5" in protocols:
+                        proto = "socks5"
+                    elif "socks4" in protocols:
+                        proto = "socks4"
+                    elif "https" in protocols:
+                        proto = "https"
+                    candidates.append((f"{ip}:{port}", proto))
+    except Exception as e:
+        print("[PROXY] Error fetching from Geonode:", str(e))
+
+    # 3. Proxy-List.download (Text-based)
+    for proto in ["http", "socks4", "socks5"]:
+        url_pld = f"https://www.proxy-list.download/api/v1/get?country=MX&type={proto}"
         try:
-            # Short timeout to keep tests snappy
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url_pld, timeout=5)
             if resp.status_code == 200:
-                lines = resp.text.splitlines()
-                for line in lines:
+                for line in resp.text.splitlines():
                     line = line.strip()
                     if line and ":" in line:
-                        proxies.append(line)
+                        candidates.append((line, proto))
         except Exception as e:
-            print("Error scraping proxies:", str(e))
+            print(f"[PROXY] Error fetching from Proxy-List.download {proto}:", str(e))
+
+    # 4. Proxyscrape v2 (Fallback)
+    for proto in ["socks4", "socks5", "http"]:
+        url_ps2 = f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol={proto}&timeout=5000&country=MX&ssl=all&anonymity=all"
+        try:
+            resp = requests.get(url_ps2, timeout=5)
+            if resp.status_code == 200:
+                for line in resp.text.splitlines():
+                    line = line.strip()
+                    if line and ":" in line:
+                        candidates.append((line, proto))
+        except Exception as e:
+            print(f"[PROXY] Error fetching from Proxyscrape v2 {proto}:", str(e))
+
+    # Deduplicate and keep ordering
+    seen = set()
+    unique_proxies = []
+    for ip_port, proto in candidates:
+        if ip_port not in seen:
+            seen.add(ip_port)
+            unique_proxies.append((ip_port, proto))
             
-    # De-duplicate
-    return list(set(proxies))
+    return unique_proxies
 
 def get_working_mexico_proxy(force_refresh=False):
     """
-    Checks if there is a cached working Mexican proxy.
-    Otherwise fetches new candidates, tests up to 10 candidates, and returns the first working one.
+    Checks if there is a cached working Mexican proxy (HTTP or SOCKS).
+    Otherwise fetches new candidates, tests up to 25 candidates, and returns the first working one.
     """
     global DYNAMIC_MEXICO_PROXY
     
@@ -401,20 +458,38 @@ def get_working_mexico_proxy(force_refresh=False):
         return DYNAMIC_MEXICO_PROXY["proxy_url"]
         
     DYNAMIC_MEXICO_PROXY["proxy_url"] = None
-    print("[PROXY] Buscando un proxy gratuito en México para saltar geobloqueo...")
+    print("[PROXY] Buscando un proxy gratuito (HTTP/SOCKS) en México...")
     
     candidates = []
-    try:
-        candidates = fetch_free_mexico_proxies()
-    except Exception as e:
-        print("[PROXY] Error fetching candidates:", str(e))
+    
+    # Known working high-quality static proxies to try FIRST (for ultra-fast startup)
+    known_working = [
+        ("38.123.220.147:999", "http"),
+        ("5.102.109.41:999", "http")
+    ]
+    
+    # Add known working ones if not force refreshing or as first choice
+    for ip_port, proto in known_working:
+        candidates.append((ip_port, proto))
         
-    print(f"[PROXY] Se encontraron {len(candidates)} candidatos de México para probar.")
+    try:
+        scraped = fetch_free_mexico_proxies()
+        # Filter out duplicates of known_working
+        for ip_port, proto in scraped:
+            if ip_port not in [kw[0] for kw in known_working]:
+                candidates.append((ip_port, proto))
+    except Exception as e:
+        print("[PROXY] Error fetching scraped candidates:", str(e))
+        
+    print(f"[PROXY] Se encontraron {len(candidates)} candidatos de México (HTTP/SOCKS) para probar.")
     
     if not candidates:
         return None
         
-    random.shuffle(candidates)
+    # Shuffle only the scraped ones, keeping the known working ones at the very front
+    scraped_part = candidates[len(known_working):]
+    random.shuffle(scraped_part)
+    candidates = candidates[:len(known_working)] + scraped_part
     
     test_url = "https://cedulaprofesional.sep.gob.mx/api/auth/token"
     test_headers = {
@@ -424,17 +499,17 @@ def get_working_mexico_proxy(force_refresh=False):
         "Accept": "application/json"
     }
     
-    # Try up to 10 candidates to keep response time within reason
-    for ip_port in candidates[:10]:
-        proxy_url = f"http://{ip_port}"
+    # Try up to 25 candidates to find a working tunnel
+    for ip_port, proto in candidates[:25]:
+        proxy_url = f"{proto}://{ip_port}"
         proxies = {
             "http": proxy_url,
             "https": proxy_url
         }
         try:
             print(f"[PROXY] Probando {proxy_url}...")
-            # Snappy test (3 seconds timeout)
-            resp = requests.get(test_url, headers=test_headers, proxies=proxies, timeout=3)
+            # Snappy test (3.5 seconds timeout)
+            resp = requests.get(test_url, headers=test_headers, proxies=proxies, timeout=3.5)
             # 200, 401, 403, 400 all mean we connected to the SEP backend successfully!
             if resp.status_code in [200, 400, 401, 403]:
                 print(f"[PROXY] ¡Conexión exitosa a través de {proxy_url}! Guardando en caché.")
@@ -444,7 +519,7 @@ def get_working_mexico_proxy(force_refresh=False):
         except Exception:
             pass
             
-    print("[PROXY] No se encontraron proxies gratuitos activos en México.")
+    print("[PROXY] No se encontraron proxies activos en México.")
     return None
 
 def get_proxies(force_refresh=False):
