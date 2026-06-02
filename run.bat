@@ -1,8 +1,8 @@
 @echo off
-title BuhoCedula Pro - Servidor Activo
+title Búsqueda Cédulas Profesionales - Servidor Activo
 color 0B
 echo =========================================================================
-echo  B U H O C E D U L A   P R O   -   B u s c a d o r   d e   C e d u l a s
+echo  B Ú S Q U E D A   C É D U L A S   P R O F E S I O N A L E S
 echo =========================================================================
 echo.
 echo  Iniciando entorno virtual de Python...

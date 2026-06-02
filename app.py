@@ -20,7 +20,7 @@ else:
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, static_folder=base_dir, static_url_path="", template_folder=base_dir)
-app.secret_key = "buho_cedula_secret_key_2026"
+app.secret_key = "busqueda_cedulas_secret_key_2026"
 
 # Global session/memory storage for active job data
 ACTIVE_JOBS = {}
@@ -248,23 +248,23 @@ def split_full_name(full_name):
 def is_medical_career(career_name, keywords=None):
     return classify_career(career_name) == "MEDICINA Y SALUD"
 
-def analyze_ambiguity(buho_rows, searched_name, medical_keywords=None):
+def analyze_ambiguity(sep_rows, searched_name, medical_keywords=None):
     """
-    Analyzes all BúhoLegal results for a single query to detect true ambiguity.
+    Analyzes all SEP results for a single query to detect true ambiguity.
     Detects name variations, active homonymies, chronological paradoxes, or age anomalies.
     Returns: dict of {cedula: {"ambigua": "Sí/No", "motivo": "..."}}
     """
     analysis = {}
-    if not buho_rows:
+    if not sep_rows:
         return analysis
 
     # Default all to "No"
-    for r in buho_rows:
+    for r in sep_rows:
         analysis[r["cedula"]] = {"ambigua": "No", "motivo": ""}
 
     # 1. Cleaned Search Name Comparison
     searched_clean = clean_name_text(searched_name)
-    for r in buho_rows:
+    for r in sep_rows:
         name_cedula_clean = clean_name_text(r["nombre_completo"])
         if name_cedula_clean != searched_clean:
             analysis[r["cedula"]] = {
@@ -274,7 +274,7 @@ def analyze_ambiguity(buho_rows, searched_name, medical_keywords=None):
 
     # 2. Group by Exact Returned Name to detect Homonymy (different people returned)
     grouped_by_name = {}
-    for r in buho_rows:
+    for r in sep_rows:
         name_key = r["nombre_completo"].strip().upper()
         if name_key not in grouped_by_name:
             grouped_by_name[name_key] = []
@@ -282,7 +282,7 @@ def analyze_ambiguity(buho_rows, searched_name, medical_keywords=None):
 
     if len(grouped_by_name) > 1:
         # Multiple different names returned for a single search -> strong homonymy
-        for r in buho_rows:
+        for r in sep_rows:
             analysis[r["cedula"]] = {
                 "ambigua": "Sí",
                 "motivo": f"Homonimia activa: Multiples personas similares encontradas"
@@ -756,7 +756,7 @@ def query_sep_api(nombre, paterno, materno):
         
     return {"status": "error", "message": "Fallo en la comunicación con la SEP tras múltiples reintentos"}
 
-def query_buholegal(nombre, paterno, materno, session_cookies=None):
+def query_sep_official(nombre, paterno, materno, session_cookies=None):
     return query_sep_api(nombre, paterno, materno)
 
 @app.route("/")
@@ -1085,7 +1085,7 @@ def background_worker(job_id):
         job["stream_events"].append({'status': 'searching', 'index': idx + 1, 'name': searched_name_raw})
         
         # Query SEP API
-        response = query_buholegal(n_clean, p_clean, m_clean, session_cookies=job["session_cookies"])
+        response = query_sep_official(n_clean, p_clean, m_clean, session_cookies=job["session_cookies"])
         
         if response["status"] == "captcha_required":
             if "cookies" in response:
@@ -1132,21 +1132,21 @@ def background_worker(job_id):
             if "cookies" in response:
                 job["session_cookies"].update(response["cookies"])
                 
-            buho_rows = response.get("results", [])
+            sep_rows = response.get("results", [])
             is_autocorrected = False
             
-            if not buho_rows:
+            if not sep_rows:
                 candidates = autocorrect_name_parts(n_clean, p_clean, m_clean)
                 for n_corr, p_corr, m_corr in candidates:
-                    resp_corr = query_buholegal(n_corr, p_corr, m_corr, session_cookies=job["session_cookies"])
+                    resp_corr = query_sep_official(n_corr, p_corr, m_corr, session_cookies=job["session_cookies"])
                     if resp_corr["status"] == "success" and resp_corr.get("results", []):
-                        buho_rows = resp_corr["results"]
+                        sep_rows = resp_corr["results"]
                         is_autocorrected = True
                         if "cookies" in resp_corr:
                             job["session_cookies"].update(resp_corr["cookies"])
                         break
                         
-            if not buho_rows:
+            if not sep_rows:
                 results_accumulated.append({
                     "original_row": row,
                     "searched_name": searched_name_raw,
@@ -1174,16 +1174,16 @@ def background_worker(job_id):
                     'results': []
                 })
             else:
-                ambiguity_report = analyze_ambiguity(buho_rows, searched_name_raw, None)
+                ambiguity_report = analyze_ambiguity(sep_rows, searched_name_raw, None)
                 
                 def get_year_key(x):
                     y = x.get("ano", "0")
                     return int(y) if str(y).isdigit() else 0
                     
-                buho_rows.sort(key=lambda x: (x["nombre_completo"], get_year_key(x)))
+                sep_rows.sort(key=lambda x: (x["nombre_completo"], get_year_key(x)))
                 
                 processed_results = []
-                for r in buho_rows:
+                for r in sep_rows:
                     cat = classify_career(r["carrera"])
                     r["categoria"] = cat
                     
@@ -1230,7 +1230,7 @@ def background_worker(job_id):
                 job["stream_events"].append({
                     'status': 'row_processed', 
                     'index': idx + 1, 
-                    'found': len(buho_rows), 
+                    'found': len(sep_rows), 
                     'name': searched_name_raw, 
                     'results': processed_results
                 })
@@ -1375,7 +1375,7 @@ if __name__ == "__main__":
     if os.environ.get("RENDER") or os.environ.get("PORT"):
         prefetch_mexico_proxy_async()
         
-    print("Iniciando BúhoCédula Pro en puerto 5050...")
+    print("Iniciando Búsqueda Cédulas Profesionales en puerto 5050...")
     
     # Automatically open local browser window for offline desktop users
     if not os.environ.get("RENDER") and not os.environ.get("PORT"):

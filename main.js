@@ -1,5 +1,5 @@
 // ==========================================================================
-// BúhoCédula Pro - Client Application Logic
+// Búsqueda Cédulas Profesionales - Client Application Logic
 // ==========================================================================
 
 // Global state variables

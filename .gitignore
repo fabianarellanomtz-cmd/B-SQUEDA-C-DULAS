@@ -36,3 +36,8 @@ sep_page.html
 search_result.html
 *.png
 *.pdf
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
