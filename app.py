@@ -361,10 +361,97 @@ def parse_raw_cookies(cookie_string):
             cookies[k] = v
     return cookies
 
-def get_proxies():
+# Cache for dynamic proxy testing
+DYNAMIC_MEXICO_PROXY = {"proxy_url": None, "last_tested": 0}
+
+def fetch_free_mexico_proxies():
     """
-    Returns proxy configuration if MEXICO_PROXY_URL is set in environment.
-    Allows bypassing Mexican government geoblocking from foreign servers (e.g. Render).
+    Fetches a list of free HTTP/HTTPS proxies in Mexico from ProxyScrape and other public providers.
+    """
+    urls = [
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country=MX&ssl=all&anonymity=all",
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=https&timeout=5000&country=MX&ssl=all&anonymity=all"
+    ]
+    proxies = []
+    for url in urls:
+        try:
+            # Short timeout to keep tests snappy
+            resp = requests.get(url, timeout=5)
+            if resp.status_code == 200:
+                lines = resp.text.splitlines()
+                for line in lines:
+                    line = line.strip()
+                    if line and ":" in line:
+                        proxies.append(line)
+        except Exception as e:
+            print("Error scraping proxies:", str(e))
+            
+    # De-duplicate
+    return list(set(proxies))
+
+def get_working_mexico_proxy(force_refresh=False):
+    """
+    Checks if there is a cached working Mexican proxy.
+    Otherwise fetches new candidates, tests up to 10 candidates, and returns the first working one.
+    """
+    global DYNAMIC_MEXICO_PROXY
+    
+    # Return cached proxy if valid and not force refreshing
+    if not force_refresh and DYNAMIC_MEXICO_PROXY["proxy_url"] and (time.time() - DYNAMIC_MEXICO_PROXY["last_tested"] < 900):
+        return DYNAMIC_MEXICO_PROXY["proxy_url"]
+        
+    DYNAMIC_MEXICO_PROXY["proxy_url"] = None
+    print("[PROXY] Buscando un proxy gratuito en México para saltar geobloqueo...")
+    
+    candidates = []
+    try:
+        candidates = fetch_free_mexico_proxies()
+    except Exception as e:
+        print("[PROXY] Error fetching candidates:", str(e))
+        
+    print(f"[PROXY] Se encontraron {len(candidates)} candidatos de México para probar.")
+    
+    if not candidates:
+        return None
+        
+    random.shuffle(candidates)
+    
+    test_url = "https://cedulaprofesional.sep.gob.mx/api/auth/token"
+    test_headers = {
+        "X-Client-Id": "rnp-angular-app-prod",
+        "X-API-Key": "65da8s675f8s75fda675s8d76as87d5as675da",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+    
+    # Try up to 10 candidates to keep response time within reason
+    for ip_port in candidates[:10]:
+        proxy_url = f"http://{ip_port}"
+        proxies = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+        try:
+            print(f"[PROXY] Probando {proxy_url}...")
+            # Snappy test (3 seconds timeout)
+            resp = requests.get(test_url, headers=test_headers, proxies=proxies, timeout=3)
+            # 200, 401, 403, 400 all mean we connected to the SEP backend successfully!
+            if resp.status_code in [200, 400, 401, 403]:
+                print(f"[PROXY] ¡Conexión exitosa a través de {proxy_url}! Guardando en caché.")
+                DYNAMIC_MEXICO_PROXY["proxy_url"] = proxy_url
+                DYNAMIC_MEXICO_PROXY["last_tested"] = time.time()
+                return proxy_url
+        except Exception:
+            pass
+            
+    print("[PROXY] No se encontraron proxies gratuitos activos en México.")
+    return None
+
+def get_proxies(force_refresh=False):
+    """
+    Returns proxy configuration.
+    1. Prioritizes MEXICO_PROXY_URL environment variable.
+    2. If running on Render/cloud, automatically queries for an active working Mexico proxy.
     """
     proxy_url = os.environ.get("MEXICO_PROXY_URL")
     if proxy_url:
@@ -372,6 +459,16 @@ def get_proxies():
             "http": proxy_url,
             "https": proxy_url
         }
+        
+    # Auto-detection for Render/cloud deployments
+    if os.environ.get("RENDER") or os.environ.get("PORT"):
+        working_proxy = get_working_mexico_proxy(force_refresh=force_refresh)
+        if working_proxy:
+            return {
+                "http": working_proxy,
+                "https": working_proxy
+            }
+            
     return None
 
 AUTHORIZED_CODES = ["VIP-BUHO-2026", "FABIAN-CORP-FREE", "PRO-ACCESS"]
@@ -390,17 +487,34 @@ def get_sep_token():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json"
     }
+    
+    # Try with current proxy configuration
     try:
         resp = requests.get(url, headers=headers, proxies=get_proxies(), timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             token = data.get("access_token")
-            # Usually lasts 3600 seconds. Keep for 3000s (50m)
             SEP_TOKEN_CACHE["token"] = token
             SEP_TOKEN_CACHE["expires_at"] = time.time() + 3000
             return token
     except Exception as e:
-        print("Error obtaining token:", str(e))
+        print("First attempt to obtain token failed:", str(e))
+        # Clear dynamic proxy cache and force a refresh/retry
+        global DYNAMIC_MEXICO_PROXY
+        if DYNAMIC_MEXICO_PROXY["proxy_url"]:
+            print("Clearing failed dynamic proxy cache and retrying...")
+            DYNAMIC_MEXICO_PROXY["proxy_url"] = None
+            try:
+                resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True), timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    token = data.get("access_token")
+                    SEP_TOKEN_CACHE["token"] = token
+                    SEP_TOKEN_CACHE["expires_at"] = time.time() + 3000
+                    return token
+            except Exception as e2:
+                print("Retry obtaining token failed:", str(e2))
+                
     return None
 
 def query_sep_api(nombre, paterno, materno):
@@ -416,7 +530,6 @@ def query_sep_api(nombre, paterno, materno):
         "Accept": "application/json"
     }
     
-    # We send UPPERCASE and trimmed parameters as Solr expects
     payload = {}
     if nombre:
         payload["nombre"] = nombre.strip().upper()
@@ -426,12 +539,10 @@ def query_sep_api(nombre, paterno, materno):
         payload["segundoApellido"] = materno.strip().upper()
 
     try:
-        # Respectful rate limiting
         time.sleep(random.uniform(0.1, 0.3))
         resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=15)
         
         if resp.status_code in [401, 403]:
-            # Token might be invalid/expired. Retry once by clearing cache.
             SEP_TOKEN_CACHE["token"] = None
             token = get_sep_token()
             if token:
@@ -468,7 +579,48 @@ def query_sep_api(nombre, paterno, materno):
 
         return {"status": "success", "results": results, "cookies": {}}
     except Exception as e:
-        print("API Query error:", str(e))
+        print("First query attempt failed:", str(e))
+        # Clear dynamic proxy cache and force a retry
+        global DYNAMIC_MEXICO_PROXY
+        if DYNAMIC_MEXICO_PROXY["proxy_url"]:
+            print("Clearing failed query proxy cache and retrying...")
+            DYNAMIC_MEXICO_PROXY["proxy_url"] = None
+            try:
+                # Force refresh token as well in case it's tied to previous IP
+                SEP_TOKEN_CACHE["token"] = None
+                token = get_sep_token()
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True), timeout=15)
+                    if resp.status_code == 200:
+                        raw_results = resp.json()
+                        results = []
+                        for r in raw_results:
+                            n = r.get("nombre") or ""
+                            p = r.get("primerApellido") or ""
+                            m = r.get("segundoApellido") or ""
+                            nombre_completo = f"{n} {p} {m}".strip()
+                            nombre_completo = re.sub(r'\s+', ' ', nombre_completo).upper()
+                            
+                            carrera = r.get("profesion") or r.get("carrera") or "DATO NO ENCONTRADO"
+                            carrera = str(carrera).upper()
+                            
+                            results.append({
+                                "cedula": r.get("cedula") or "",
+                                "tipo": r.get("tipo") or "C1",
+                                "nombre_completo": nombre_completo,
+                                "nombre_sep": n.strip().upper(),
+                                "paterno_sep": p.strip().upper(),
+                                "materno_sep": m.strip().upper(),
+                                "carrera": carrera,
+                                "universidad": (r.get("institucion") or "DATO NO ENCONTRADO").upper(),
+                                "estado": (r.get("entidadInstitucion") or "DATO NO ENCONTRADO").upper(),
+                                "ano": r.get("anioRegistro") or "DATO NO ENCONTRADO"
+                            })
+                        return {"status": "success", "results": results, "cookies": {}}
+            except Exception as e2:
+                print("Retry query attempt failed:", str(e2))
+                
         return {"status": "error", "message": str(e)}
 
 def query_buholegal(nombre, paterno, materno, session_cookies=None):
