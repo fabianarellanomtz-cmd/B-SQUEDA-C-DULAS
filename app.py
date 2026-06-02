@@ -499,8 +499,8 @@ def get_working_mexico_proxy(force_refresh=False):
         "Accept": "application/json"
     }
     
-    # Try up to 25 candidates to find a working tunnel
-    for ip_port, proto in candidates[:25]:
+    # Try up to 5 candidates to find a working tunnel
+    for ip_port, proto in candidates[:5]:
         proxy_url = f"{proto}://{ip_port}"
         proxies = {
             "http": proxy_url,
@@ -585,9 +585,9 @@ def get_sep_token():
         "Accept": "application/json"
     }
     
-    # Try with current proxy configuration
+    # Try with current proxy configuration (fast 6 seconds timeout)
     try:
-        resp = requests.get(url, headers=headers, proxies=get_proxies(), timeout=10)
+        resp = requests.get(url, headers=headers, proxies=get_proxies(), timeout=6)
         if resp.status_code == 200:
             data = resp.json()
             token = data.get("access_token")
@@ -602,7 +602,7 @@ def get_sep_token():
             print("Clearing failed dynamic proxy cache and retrying...")
             DYNAMIC_MEXICO_PROXY["proxy_url"] = None
             try:
-                resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True), timeout=10)
+                resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True), timeout=6)
                 if resp.status_code == 200:
                     data = resp.json()
                     token = data.get("access_token")
@@ -615,17 +615,10 @@ def get_sep_token():
     return None
 
 def query_sep_api(nombre, paterno, materno):
-    token = get_sep_token()
-    if not token:
-        return {"status": "error", "message": "No se pudo obtener el token de acceso de la SEP"}
-
+    # Try up to 2 attempts using the current cached proxy
+    # If both attempts fail, we will clear the proxy cache and perform one final attempt with a fresh proxy
+    
     url = "https://cedulaprofesional.sep.gob.mx/api/solr/profesionista/consultar/byDetalle"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-    }
     
     payload = {}
     if nombre:
@@ -635,90 +628,123 @@ def query_sep_api(nombre, paterno, materno):
     if materno:
         payload["segundoApellido"] = materno.strip().upper()
 
-    try:
-        time.sleep(random.uniform(0.1, 0.3))
-        resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=15)
+    # Attempt loop
+    for attempt in range(1, 3):
+        token = get_sep_token()
+        if not token:
+            print(f"[SEP] No se pudo obtener token de la SEP en intento {attempt}.")
+            time.sleep(1.0)
+            continue
+            
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
         
-        if resp.status_code in [401, 403]:
-            SEP_TOKEN_CACHE["token"] = None
-            token = get_sep_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-                resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=15)
-
-        if resp.status_code != 200:
-            return {"status": "error", "message": f"Servidor SEP respondio con codigo {resp.status_code}"}
-
-        raw_results = resp.json()
-        results = []
-        for r in raw_results:
-            n = r.get("nombre") or ""
-            p = r.get("primerApellido") or ""
-            m = r.get("segundoApellido") or ""
-            nombre_completo = f"{n} {p} {m}".strip()
-            nombre_completo = re.sub(r'\s+', ' ', nombre_completo).upper()
+        try:
+            # Slower, natural query pacing to respect the SEP endpoint (anti-bot friendly)
+            time.sleep(random.uniform(0.8, 1.6))
+            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=6)
             
-            carrera = r.get("profesion") or r.get("carrera") or "DATO NO ENCONTRADO"
-            carrera = str(carrera).upper()
-            
-            results.append({
-                "cedula": r.get("cedula") or "",
-                "tipo": r.get("tipo") or "C1",
-                "nombre_completo": nombre_completo,
-                "nombre_sep": n.strip().upper(),
-                "paterno_sep": p.strip().upper(),
-                "materno_sep": m.strip().upper(),
-                "carrera": carrera,
-                "universidad": (r.get("institucion") or "DATO NO ENCONTRADO").upper(),
-                "estado": (r.get("entidadInstitucion") or "DATO NO ENCONTRADO").upper(),
-                "ano": r.get("anioRegistro") or "DATO NO ENCONTRADO"
-            })
-
-        return {"status": "success", "results": results, "cookies": {}}
-    except Exception as e:
-        print("First query attempt failed:", str(e))
-        # Clear dynamic proxy cache and force a retry
-        global DYNAMIC_MEXICO_PROXY
-        if DYNAMIC_MEXICO_PROXY["proxy_url"]:
-            print("Clearing failed query proxy cache and retrying...")
-            DYNAMIC_MEXICO_PROXY["proxy_url"] = None
-            try:
-                # Force refresh token as well in case it's tied to previous IP
+            if resp.status_code in [401, 403]:
+                # Token expired, clear token cache and retry immediately
+                print("[SEP] Token expirado en intento. Renovando token...")
                 SEP_TOKEN_CACHE["token"] = None
                 token = get_sep_token()
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
-                    resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True), timeout=15)
-                    if resp.status_code == 200:
-                        raw_results = resp.json()
-                        results = []
-                        for r in raw_results:
-                            n = r.get("nombre") or ""
-                            p = r.get("primerApellido") or ""
-                            m = r.get("segundoApellido") or ""
-                            nombre_completo = f"{n} {p} {m}".strip()
-                            nombre_completo = re.sub(r'\s+', ' ', nombre_completo).upper()
-                            
-                            carrera = r.get("profesion") or r.get("carrera") or "DATO NO ENCONTRADO"
-                            carrera = str(carrera).upper()
-                            
-                            results.append({
-                                "cedula": r.get("cedula") or "",
-                                "tipo": r.get("tipo") or "C1",
-                                "nombre_completo": nombre_completo,
-                                "nombre_sep": n.strip().upper(),
-                                "paterno_sep": p.strip().upper(),
-                                "materno_sep": m.strip().upper(),
-                                "carrera": carrera,
-                                "universidad": (r.get("institucion") or "DATO NO ENCONTRADO").upper(),
-                                "estado": (r.get("entidadInstitucion") or "DATO NO ENCONTRADO").upper(),
-                                "ano": r.get("anioRegistro") or "DATO NO ENCONTRADO"
-                            })
-                        return {"status": "success", "results": results, "cookies": {}}
-            except Exception as e2:
-                print("Retry query attempt failed:", str(e2))
+                    resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=6)
+            
+            if resp.status_code == 200:
+                raw_results = resp.json()
+                results = []
+                for r in raw_results:
+                    n = r.get("nombre") or ""
+                    p = r.get("primerApellido") or ""
+                    m = r.get("segundoApellido") or ""
+                    nombre_completo = f"{n} {p} {m}".strip()
+                    nombre_completo = re.sub(r'\s+', ' ', nombre_completo).upper()
+                    
+                    carrera = r.get("profesion") or r.get("carrera") or "DATO NO ENCONTRADO"
+                    carrera = str(carrera).upper()
+                    
+                    results.append({
+                        "cedula": r.get("cedula") or "",
+                        "tipo": r.get("tipo") or "C1",
+                        "nombre_completo": nombre_completo,
+                        "nombre_sep": n.strip().upper(),
+                        "paterno_sep": p.strip().upper(),
+                        "materno_sep": m.strip().upper(),
+                        "carrera": carrera,
+                        "universidad": (r.get("institucion") or "DATO NO ENCONTRADO").upper(),
+                        "estado": (r.get("entidadInstitucion") or "DATO NO ENCONTRADO").upper(),
+                        "ano": r.get("anioRegistro") or "DATO NO ENCONTRADO"
+                    })
+                return {"status": "success", "results": results, "cookies": {}}
                 
-        return {"status": "error", "message": str(e)}
+            else:
+                print(f"[SEP] Intento {attempt} falló con código de estado: {resp.status_code}")
+                time.sleep(1.0)
+        except Exception as e:
+            print(f"[SEP] Intento {attempt} falló debido a excepción: {type(e).__name__} - {str(e)}")
+            time.sleep(1.0)
+            
+    # If we are here, 2 attempts failed with the current proxy!
+    # Assume the proxy is dead. Clear cache and try one final time with a fresh force-refreshed proxy.
+    print("[SEP] Ambos intentos fallaron. Asumiendo proxy inactivo. Limpiando caché de proxy...")
+    global DYNAMIC_MEXICO_PROXY
+    DYNAMIC_MEXICO_PROXY["proxy_url"] = None
+    
+    # Trigger background harvester asynchronously to find more candidates for next runs
+    prefetch_mexico_proxy_async()
+    
+    # Try one last final attempt with a freshly scraped working proxy (fast 6s timeout)
+    try:
+        SEP_TOKEN_CACHE["token"] = None  # Force clean token cache too
+        token = get_sep_token()
+        if token:
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json"
+            }
+            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True), timeout=6)
+            if resp.status_code == 200:
+                raw_results = resp.json()
+                results = []
+                for r in raw_results:
+                    n = r.get("nombre") or ""
+                    p = r.get("primerApellido") or ""
+                    m = r.get("segundoApellido") or ""
+                    nombre_completo = f"{n} {p} {m}".strip()
+                    nombre_completo = re.sub(r'\s+', ' ', nombre_completo).upper()
+                    
+                    carrera = r.get("profesion") or r.get("carrera") or "DATO NO ENCONTRADO"
+                    carrera = str(carrera).upper()
+                    
+                    results.append({
+                        "cedula": r.get("cedula") or "",
+                        "tipo": r.get("tipo") or "C1",
+                        "nombre_completo": nombre_completo,
+                        "nombre_sep": n.strip().upper(),
+                        "paterno_sep": p.strip().upper(),
+                        "materno_sep": m.strip().upper(),
+                        "carrera": carrera,
+                        "universidad": (r.get("institucion") or "DATO NO ENCONTRADO").upper(),
+                        "estado": (r.get("entidadInstitucion") or "DATO NO ENCONTRADO").upper(),
+                        "ano": r.get("anioRegistro") or "DATO NO ENCONTRADO"
+                    })
+                return {"status": "success", "results": results, "cookies": {}}
+            else:
+                return {"status": "error", "message": f"Servidor SEP respondió con código {resp.status_code} tras refresco de proxy"}
+    except Exception as e3:
+        print("[SEP] Intento final con refresco de proxy falló:", str(e3))
+        return {"status": "error", "message": f"Fallo final tras refresco de proxy: {str(e3)}"}
+        
+    return {"status": "error", "message": "Fallo en la comunicación con la SEP tras múltiples reintentos"}
 
 def query_buholegal(nombre, paterno, materno, session_cookies=None):
     return query_sep_api(nombre, paterno, materno)
@@ -1012,6 +1038,9 @@ def process_job(job_id):
                 p_clean = clean_name_text(split_paterno)
                 m_clean = clean_name_text(split_materno)
             
+            # Keep-alive heartbeat to reset Render 30s idle timeout before blocking call
+            yield ": keepalive\n\n"
+            
             # Update live logger
             yield f"data: {json.dumps({'status': 'searching', 'index': idx + 1, 'name': searched_name_raw})}\n\n"
             
@@ -1160,8 +1189,8 @@ def process_job(job_id):
                     })}\n\n"
 
             idx += 1
-            # Simple cooling down to respect the target server
-            time.sleep(0.5)
+            # Slower natural pacing to avoid triggering rate-limiting / IP bans on the SEP API
+            time.sleep(random.uniform(1.2, 2.5))
 
         # Job complete!
         job["status"] = "completed"
