@@ -102,6 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initModals();
     initTableFilters();
     checkActiveJobOnLoad();
+    initInputModeToggle();
 });
 
 // Drag & Drop
@@ -1106,3 +1107,167 @@ document.addEventListener("visibilitychange", () => {
         }
     }
 });
+
+function initInputModeToggle() {
+    const btnModeExcel = document.getElementById("btn-mode-excel");
+    const btnModeManual = document.getElementById("btn-mode-manual");
+    const excelInputGroup = document.getElementById("excel-input-group");
+    const manualInputGroup = document.getElementById("manual-input-group");
+    const cardConfig = document.getElementById("card-config");
+
+    const btnManualByName = document.getElementById("btn-manual-byname");
+    const btnManualByCedula = document.getElementById("btn-manual-bycedula");
+    const manualFieldsName = document.getElementById("manual-fields-name");
+    const manualFieldsCedula = document.getElementById("manual-fields-cedula");
+
+    const btnSearchManual = document.getElementById("btn-search-manual");
+
+    if (btnModeExcel && btnModeManual) {
+        btnModeExcel.addEventListener("click", () => {
+            btnModeExcel.classList.add("active");
+            btnModeManual.classList.remove("active");
+            excelInputGroup.classList.remove("hidden");
+            manualInputGroup.classList.add("hidden");
+            if (currentUploadedFile) {
+                cardConfig.classList.remove("disabled");
+            }
+            appendLog("[SISTEMA] Cambiado a modo: Carga de Excel.", "info");
+        });
+
+        btnModeManual.addEventListener("click", () => {
+            btnModeManual.classList.add("active");
+            btnModeExcel.classList.remove("active");
+            excelInputGroup.classList.add("hidden");
+            manualInputGroup.classList.remove("hidden");
+            cardConfig.classList.add("disabled"); // Disable mapping during manual search
+            appendLog("[SISTEMA] Cambiado a modo: Búsqueda Manual.", "info");
+        });
+    }
+
+    if (btnManualByName && btnManualByCedula) {
+        btnManualByName.addEventListener("click", () => {
+            btnManualByName.classList.add("active");
+            btnManualByCedula.classList.remove("active");
+            manualFieldsName.classList.remove("hidden");
+            manualFieldsCedula.classList.add("hidden");
+        });
+
+        btnManualByCedula.addEventListener("click", () => {
+            btnManualByCedula.classList.add("active");
+            btnManualByName.classList.remove("active");
+            manualFieldsName.classList.add("hidden");
+            manualFieldsCedula.classList.remove("hidden");
+        });
+    }
+
+    if (btnSearchManual) {
+        btnSearchManual.addEventListener("click", () => executeManualSearch());
+    }
+}
+
+function executeManualSearch() {
+    const btnSearchManual = document.getElementById("btn-search-manual");
+    const isByName = document.getElementById("btn-manual-byname").classList.contains("active");
+
+    let payload = {};
+    if (isByName) {
+        const nombre = document.getElementById("input-manual-nombre").value.trim();
+        const paterno = document.getElementById("input-manual-paterno").value.trim();
+        const materno = document.getElementById("input-manual-materno").value.trim();
+
+        if (!nombre && !paterno && !materno) {
+            alert("Por favor introduce al menos un nombre o apellido para buscar.");
+            return;
+        }
+        payload = { nombre, paterno, materno };
+        appendLog(`[BÚSQUEDA MANUAL] Buscando por nombre: "${nombre} ${paterno} ${materno}"...`, "info");
+    } else {
+        const cedula = document.getElementById("input-manual-cedula").value.trim();
+        if (!cedula) {
+            alert("Por favor introduce un número de cédula para buscar.");
+            return;
+        }
+        payload = { cedula };
+        appendLog(`[BÚSQUEDA MANUAL] Buscando por número de cédula: "${cedula}"...`, "info");
+    }
+
+    // Set UI loading state
+    btnSearchManual.setAttribute("disabled", "true");
+    const originalContent = btnSearchManual.innerHTML;
+    btnSearchManual.innerHTML = `<span class="spinner"></span> <span>Buscando en la SEP...</span>`;
+
+    // Ensure results section is visible
+    resultsSection.classList.remove("hidden");
+
+    fetch("/api/manual_search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    })
+    .then(res => {
+        if (!res.ok) throw new Error("Error en el servidor al realizar la búsqueda manual.");
+        return res.json();
+    })
+    .then(data => {
+        if (data.status === "captcha_required") {
+            appendLog(`[SEGURIDAD] La API de la SEP requiere validación humana. Por favor haz una búsqueda en el sitio oficial primero.`, "error");
+            modalCaptcha.classList.remove("hidden");
+            return;
+        }
+
+        if (data.results && data.results.length > 0) {
+            appendLog(`[EXITO] Búsqueda manual finalizada. Se encontraron ${data.results.length} coincidencias.`, "success");
+            
+            data.results.forEach(res => {
+                const rowData = {
+                    id: res.id,
+                    original: data.searched_name,
+                    nombre: res.nombre,
+                    cedula: res.cedula,
+                    tipo: res.categoria,
+                    carrera: res.carrera,
+                    meta: `${res.universidad} | ${res.estado} | ${res.ano}`,
+                    ambigua: res.ambigua,
+                    motivo: res.motivo
+                };
+                
+                // Prevent duplicates in resultsStore
+                if (!resultsStore.some(item => item.cedula === res.cedula && item.cedula !== "-")) {
+                    resultsStore.push(rowData);
+                    addResultRowToTable(rowData);
+                }
+            });
+        } else {
+            appendLog(`[OK] Búsqueda manual finalizada: Sin registros encontrados para "${data.searched_name}".`, "info");
+            
+            const rowData = {
+                id: "N/A",
+                original: data.searched_name,
+                nombre: "NO ENCONTRADO",
+                cedula: "-",
+                tipo: "NOT_FOUND",
+                carrera: "-",
+                meta: "-",
+                ambigua: "No"
+            };
+            resultsStore.push(rowData);
+            addResultRowToTable(rowData);
+        }
+
+        // Clean inputs on success
+        if (isByName) {
+            document.getElementById("input-manual-nombre").value = "";
+            document.getElementById("input-manual-paterno").value = "";
+            document.getElementById("input-manual-materno").value = "";
+        } else {
+            document.getElementById("input-manual-cedula").value = "";
+        }
+    })
+    .catch(err => {
+        appendLog(`[ERROR] Falló la búsqueda manual: ${err.message}`, "error");
+    })
+    .finally(() => {
+        btnSearchManual.removeAttribute("disabled");
+        btnSearchManual.innerHTML = originalContent;
+    });
+}

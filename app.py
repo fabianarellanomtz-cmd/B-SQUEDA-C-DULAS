@@ -624,19 +624,22 @@ def get_sep_token():
                 
     return None
 
-def query_sep_api(nombre, paterno, materno):
+def query_sep_api(nombre, paterno, materno, num_cedula=None):
     # Try up to 2 attempts using the current cached proxy
     # If both attempts fail, we will clear the proxy cache and perform one final attempt with a fresh proxy
     
     url = "https://cedulaprofesional.sep.gob.mx/api/solr/profesionista/consultar/byDetalle"
     
     payload = {}
-    if nombre:
-        payload["nombre"] = nombre.strip().upper()
-    if paterno:
-        payload["primerApellido"] = paterno.strip().upper()
-    if materno:
-        payload["segundoApellido"] = materno.strip().upper()
+    if num_cedula:
+        payload["numCedula"] = num_cedula.strip()
+    else:
+        if nombre:
+            payload["nombre"] = nombre.strip().upper()
+        if paterno:
+            payload["primerApellido"] = paterno.strip().upper()
+        if materno:
+            payload["segundoApellido"] = materno.strip().upper()
 
     # Attempt loop
     for attempt in range(1, 3):
@@ -1024,6 +1027,99 @@ def resume_job(job_id):
         return jsonify({"error": "La tarea ya está completada."}), 400
     job["status"] = "processing"
     return jsonify({"success": True, "message": "Tarea reanudada en el servidor."})
+
+@app.route("/api/manual_search", methods=["POST"])
+def manual_search():
+    data = request.json or {}
+    nombre = data.get("nombre", "").strip()
+    paterno = data.get("paterno", "").strip()
+    materno = data.get("materno", "").strip()
+    cedula = data.get("cedula", "").strip()
+
+    if not cedula and not (nombre or paterno or materno):
+        return jsonify({"error": "Debes proporcionar un número de cédula o al menos un nombre/apellido."}), 400
+
+    # Obtain token
+    token = get_sep_token()
+    if not token:
+        return jsonify({"error": "No se pudo obtener el token de validación oficial de la SEP."}), 500
+
+    # Call query_sep_api
+    if cedula:
+        response = query_sep_api(None, None, None, num_cedula=cedula)
+    else:
+        # Search directly
+        n_clean = clean_name_text(nombre)
+        p_clean = clean_name_text(paterno)
+        m_clean = clean_name_text(materno)
+        response = query_sep_api(n_clean, p_clean, m_clean)
+
+    if response["status"] == "error":
+        return jsonify({"error": response.get("message", "Error de red con la SEP.")}), 500
+    elif response["status"] == "captcha_required":
+        return jsonify({"status": "captcha_required", "message": "La SEP requiere validación de seguridad."})
+
+    sep_rows = response.get("results", [])
+    
+    # Try autocorrect for name search if empty results
+    if not sep_rows and not cedula:
+        n_clean = clean_name_text(nombre)
+        p_clean = clean_name_text(paterno)
+        m_clean = clean_name_text(materno)
+        candidates = autocorrect_name_parts(n_clean, p_clean, m_clean)
+        for n_corr, p_corr, m_corr in candidates:
+            resp_corr = query_sep_api(n_corr, p_corr, m_corr)
+            if resp_corr["status"] == "success" and resp_corr.get("results", []):
+                sep_rows = resp_corr["results"]
+                break
+
+    # Analyze ambiguity
+    searched_name = f"{nombre} {paterno} {materno}".strip() if not cedula else f"Cédula {cedula}"
+    ambiguity_report = analyze_ambiguity(sep_rows, searched_name)
+
+    # Classify careers
+    PREFIX_MAP = {
+        "MEDICINA Y SALUD": "MED",
+        "INGENIERÍA Y TECNOLOGÍA": "TEC",
+        "ARQUITECTURA Y DISEÑO": "ARQ",
+        "DERECHO Y LEYES": "DER",
+        "NEGOCIOS Y FINANZAS": "NEG",
+        "EDUCACIÓN Y HUMANIDADES": "EDU",
+        "OTRA PROFESIÓN": "GEN"
+    }
+
+    results = []
+    job_id_suffix = str(int(time.time()))[-4:]
+    
+    for idx, r in enumerate(sep_rows):
+        cat = classify_career(r["carrera"])
+        prefix = PREFIX_MAP.get(cat, "GEN")
+        id_res = f"{prefix}-{job_id_suffix}-M{idx+1:02d}"
+        
+        rep = ambiguity_report.get(r["cedula"], {"ambigua": "No", "motivo": ""})
+        
+        results.append({
+            "id": id_res,
+            "cedula": r["cedula"],
+            "nombre": r["nombre_completo"],
+            "nombre_sep": r.get("nombre_sep", ""),
+            "paterno_sep": r.get("paterno_sep", ""),
+            "materno_sep": r.get("materno_sep", ""),
+            "carrera": r["carrera"],
+            "universidad": r["universidad"],
+            "estado": r["estado"],
+            "ano": r["ano"],
+            "categoria": cat,
+            "ambigua": rep["ambigua"],
+            "motivo": rep["motivo"]
+        })
+
+    return jsonify({
+        "status": "success",
+        "searched_name": searched_name,
+        "found_count": len(results),
+        "results": results
+    })
 
 def background_worker(job_id):
     job = ACTIVE_JOBS.get(job_id)

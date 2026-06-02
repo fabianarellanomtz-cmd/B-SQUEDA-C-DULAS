@@ -52,45 +52,113 @@
                     <div class="glass-card panel-card" id="card-upload">
                         <div class="card-header">
                             <span class="badge-step">1</span>
-                            <h3>Carga de Archivo</h3>
+                            <h3>Carga de Archivo o Búsqueda</h3>
                         </div>
                         
-                        <!-- Toggle de Estructuración -->
-                        <div class="struct-toggle-wrapper">
-                            <label class="section-sub-label">Estructura de tu archivo Excel:</label>
+                        <!-- Toggle de Entrada (Excel vs Manual) -->
+                        <div class="struct-toggle-wrapper" style="margin-bottom: 1.25rem;">
+                            <label class="section-sub-label">Método de consulta:</label>
                             <div class="toggle-container">
-                                <button id="btn-struct-yes" class="toggle-btn active" type="button">
-                                    <i data-lucide="table-2"></i>
-                                    <span>Estructurado (3 Columnas)</span>
+                                <button id="btn-mode-excel" class="toggle-btn active" type="button">
+                                    <i data-lucide="file-spreadsheet"></i>
+                                    <span>Procesar Excel</span>
                                 </button>
-                                <button id="btn-struct-no" class="toggle-btn" type="button">
-                                    <i data-lucide="align-left"></i>
-                                    <span>No Estructurado (1 Columna)</span>
+                                <button id="btn-mode-manual" class="toggle-btn" type="button">
+                                    <i data-lucide="search"></i>
+                                    <span>Búsqueda Manual</span>
                                 </button>
                             </div>
                         </div>
-
-                        <div id="drop-zone" class="drop-zone">
-                            <div class="drop-zone-content">
-                                <div class="upload-icon-container">
-                                    <i data-lucide="file-spreadsheet" class="icon-xl"></i>
+                        
+                        <!-- Excel Input Group -->
+                        <div id="excel-input-group">
+                            <!-- Toggle de Estructuración -->
+                            <div class="struct-toggle-wrapper" style="margin-top: 1rem;">
+                                <label class="section-sub-label">Estructura de tu archivo Excel:</label>
+                                <div class="toggle-container">
+                                    <button id="btn-struct-yes" class="toggle-btn active" type="button">
+                                        <i data-lucide="table-2"></i>
+                                        <span>Estructurado (3 Columnas)</span>
+                                    </button>
+                                    <button id="btn-struct-no" class="toggle-btn" type="button">
+                                        <i data-lucide="align-left"></i>
+                                        <span>No Estructurado (1 Columna)</span>
+                                    </button>
                                 </div>
-                                <h4>Arrastra tu Excel (.xlsx, .xls)</h4>
-                                <p>O haz clic para explorar tus archivos</p>
-                                <label for="file-input" class="btn-primary select-btn">
-                                    Seleccionar Excel
-                                    <input type="file" id="file-input" accept=".xlsx, .xls" hidden>
-                                </label>
+                            </div>
+
+                            <div id="drop-zone" class="drop-zone" style="margin-top: 1rem;">
+                                <div class="drop-zone-content">
+                                    <div class="upload-icon-container">
+                                        <i data-lucide="file-spreadsheet" class="icon-xl"></i>
+                                    </div>
+                                    <h4>Arrastra tu Excel (.xlsx, .xls)</h4>
+                                    <p>O haz clic para explorar tus archivos</p>
+                                    <label for="file-input" class="btn-primary select-btn">
+                                        Seleccionar Excel
+                                        <input type="file" id="file-input" accept=".xlsx, .xls" hidden>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="uploaded-file-details" class="file-details hidden" style="margin-top: 1rem;">
+                                <i data-lucide="file-check" class="icon-success"></i>
+                                <div class="file-info">
+                                    <h5 id="file-name">archivo.xlsx</h5>
+                                    <p id="file-meta">0 filas cargadas</p>
+                                </div>
+                                <button id="btn-change-file" class="btn-icon-danger" title="Cambiar archivo">
+                                    <i data-lucide="refresh-cw"></i>
+                                </button>
                             </div>
                         </div>
-                        <div id="uploaded-file-details" class="file-details hidden">
-                            <i data-lucide="file-check" class="icon-success"></i>
-                            <div class="file-info">
-                                <h5 id="file-name">archivo.xlsx</h5>
-                                <p id="file-meta">0 filas cargadas</p>
+                        
+                        <!-- Manual Input Group -->
+                        <div id="manual-input-group" class="hidden">
+                            <!-- Selector Manual (Nombre vs Cedula) -->
+                            <div class="struct-toggle-wrapper" style="margin-top: 1rem;">
+                                <label class="section-sub-label">Criterio de búsqueda:</label>
+                                <div class="toggle-container">
+                                    <button id="btn-manual-byname" class="toggle-btn active" type="button">
+                                        <i data-lucide="user"></i>
+                                        <span>Por Nombre</span>
+                                    </button>
+                                    <button id="btn-manual-bycedula" class="toggle-btn" type="button">
+                                        <i data-lucide="hash"></i>
+                                        <span>Por Cédula</span>
+                                    </button>
+                                </div>
                             </div>
-                            <button id="btn-change-file" class="btn-icon-danger" title="Cambiar archivo">
-                                <i data-lucide="refresh-cw"></i>
+                            
+                            <!-- Search by Name Fields -->
+                            <div id="manual-fields-name" style="margin-top: 1rem;">
+                                <div class="form-group">
+                                    <label>Nombre/s</label>
+                                    <input type="text" id="input-manual-nombre" class="custom-input" placeholder="Ej. Hugo">
+                                </div>
+                                <div class="form-group-row">
+                                    <div class="form-group w-half">
+                                        <label>Apellido 1 (Paterno)</label>
+                                        <input type="text" id="input-manual-paterno" class="custom-input" placeholder="Ej. López Gatell">
+                                    </div>
+                                    <div class="form-group w-half">
+                                        <label>Apellido 2 (Materno)</label>
+                                        <input type="text" id="input-manual-materno" class="custom-input" placeholder="Ej. Ramírez">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Search by Cédula Field -->
+                            <div id="manual-fields-cedula" class="hidden" style="margin-top: 1rem;">
+                                <div class="form-group">
+                                    <label>Número de Cédula</label>
+                                    <input type="text" id="input-manual-cedula" class="custom-input" placeholder="Ej. 2325958" oninput="this.value = this.value.replace(/\D/g, '')">
+                                </div>
+                            </div>
+                            
+                            <!-- Manual Search Button -->
+                            <button id="btn-search-manual" class="btn-primary w-full" type="button" style="margin-top: 1.5rem; height: 3rem;">
+                                <i data-lucide="search"></i>
+                                <span>Realizar Búsqueda Manual</span>
                             </button>
                         </div>
                     </div>
