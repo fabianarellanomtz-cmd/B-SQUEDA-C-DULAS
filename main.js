@@ -16,6 +16,11 @@ let currentUploadedFile = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 
+// Billing and Payment states
+let amountMxn = 0.0;
+let isAuthorized = false;
+let isPaid = false;
+
 // DOM Element references
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
@@ -35,7 +40,12 @@ const selectColPaterno = document.getElementById("select-col-paterno");
 const selectColMaterno = document.getElementById("select-col-materno");
 const selectColFullname = document.getElementById("select-col-fullname");
 
-// Keywords preview elements removed
+// Hybrid Billing elements
+const inputAccessKey = document.getElementById("input-access-key");
+const accessKeyStatus = document.getElementById("access-key-status");
+const billingTotalCost = document.getElementById("billing-total-cost");
+const btnPayValidation = document.getElementById("btn-pay-validation");
+
 const btnStartProcess = document.getElementById("btn-start-process");
 
 const cardPreview = document.getElementById("card-preview");
@@ -57,12 +67,29 @@ const resultsTableBody = document.getElementById("results-table-body");
 const btnExportExcel = document.getElementById("btn-export-excel");
 
 // Modals elements
-// Keyword modal elements removed
-
 const modalCaptcha = document.getElementById("modal-captcha");
 const textareaCookies = document.getElementById("textarea-cookies");
 const btnSubmitCookies = document.getElementById("btn-submit-cookies");
 const captchaErrorMsg = document.getElementById("captcha-error-msg");
+
+// Payment Modal elements
+const modalPayment = document.getElementById("modal-payment");
+const btnClosePayment = document.getElementById("btn-close-payment");
+const btnCancelPayment = document.getElementById("btn-cancel-payment");
+const btnConfirmPayment = document.getElementById("btn-confirm-payment");
+const formCcPayment = document.getElementById("form-cc-payment");
+const paySummaryRows = document.getElementById("pay-summary-rows");
+const paySummaryTotal = document.getElementById("pay-summary-total");
+const receiptTxId = document.getElementById("receipt-tx-id");
+const receiptTxAmount = document.getElementById("receipt-tx-amount");
+const paymentFormView = document.getElementById("payment-form-view");
+const paymentProcessingView = document.getElementById("payment-processing-view");
+const paymentSuccessView = document.getElementById("payment-success-view");
+const paymentFooterActions = document.getElementById("payment-footer-actions");
+const ccName = document.getElementById("cc-name");
+const ccNumber = document.getElementById("cc-number");
+const ccExpiry = document.getElementById("cc-expiry");
+const ccCvc = document.getElementById("cc-cvc");
 
 // ==========================================================================
 // Event Listeners & Initialization
@@ -187,6 +214,7 @@ function handleUploadedFile(file) {
     .then(data => {
         currentJobId = data.job_id;
         totalRecords = data.total_rows;
+        amountMxn = data.amount_mxn;
         
         // Show file details
         fileNameDisp.textContent = file.name;
@@ -196,7 +224,9 @@ function handleUploadedFile(file) {
         
         // Enable configs panel
         cardConfig.classList.remove("disabled");
-        btnStartProcess.removeAttribute("disabled");
+        
+        // Evaluate dynamic hybrid payment status
+        evaluatePaymentStatus();
         
         // Populate Mapping selectors
         populateSelectors(data.columns, data.mapped);
@@ -219,6 +249,25 @@ function resetToUploadState() {
     fileInput.value = "";
     currentJobId = null;
     totalRecords = 0;
+    
+    // Billing states reset
+    amountMxn = 0.0;
+    isAuthorized = false;
+    isPaid = false;
+    if (inputAccessKey) {
+        inputAccessKey.value = "";
+        inputAccessKey.className = "custom-input";
+    }
+    if (accessKeyStatus) {
+        accessKeyStatus.className = "access-status-text";
+        accessKeyStatus.textContent = "Sin clave: se aplicará tarifa de validación por fila.";
+    }
+    if (billingTotalCost) {
+        billingTotalCost.textContent = "$0.00 MXN";
+    }
+    if (btnPayValidation) {
+        btnPayValidation.classList.add("hidden");
+    }
     
     uploadedDetails.classList.add("hidden");
     dropZone.classList.remove("hidden");
@@ -396,6 +445,200 @@ function initModals() {
             btnSubmitCookies.querySelector("span").textContent = "Actualizar Sesión y Reanudar";
         });
     });
+
+    // Payment Modal Cancel & Close
+    btnClosePayment.addEventListener("click", () => closePaymentModal());
+    btnCancelPayment.addEventListener("click", () => closePaymentModal());
+
+    // CC number input formatting (4-4-4-4 spacing)
+    ccNumber.addEventListener("input", (e) => {
+        let value = e.target.value.replace(/\D/g, "");
+        let formatted = "";
+        for (let i = 0; i < value.length; i++) {
+            if (i > 0 && i % 4 === 0) formatted += " ";
+            formatted += value[i];
+        }
+        e.target.value = formatted;
+    });
+
+    // CC Expiry formatting (MM/AA)
+    ccExpiry.addEventListener("input", (e) => {
+        let value = e.target.value.replace(/\D/g, "");
+        if (value.length > 2) {
+            e.target.value = value.substring(0, 2) + "/" + value.substring(2, 4);
+        } else {
+            e.target.value = value;
+        }
+    });
+
+    // Simulated Payment Submission
+    formCcPayment.addEventListener("submit", (e) => {
+        e.preventDefault();
+        
+        // Form validations
+        if (!ccName.value || ccNumber.value.length < 16 || ccExpiry.value.length < 5 || ccCvc.value.length < 3) {
+            alert("Por favor completa los datos de tu tarjeta correctamente.");
+            return;
+        }
+
+        // Transition to Processing View
+        paymentFormView.classList.add("hidden");
+        paymentFooterActions.classList.add("hidden");
+        paymentProcessingView.classList.remove("hidden");
+
+        setTimeout(() => {
+            // Confirm transaction to server
+            fetch("/api/simulate_payment", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ job_id: currentJobId })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error("Fallo en la comunicación con el procesador de pagos.");
+                return res.json();
+            })
+            .then(data => {
+                // Transition to Success View
+                paymentProcessingView.classList.add("hidden");
+                paymentSuccessView.classList.remove("hidden");
+
+                // Generate and display transaction details
+                const txId = "TX-" + Math.floor(10000 + Math.random() * 90000) + "-OK";
+                receiptTxId.textContent = txId;
+                receiptTxAmount.textContent = `$${amountMxn.toFixed(2)} MXN`;
+
+                isPaid = true;
+                evaluatePaymentStatus();
+
+                appendLog(`[PAGO] ¡Transacción autorizada con éxito por el banco emisor! Referencia: ${txId}. Costo: $${amountMxn.toFixed(2)} MXN.`, "success");
+
+                // Close after brief delay to let user see success screen
+                setTimeout(() => {
+                    closePaymentModal();
+                }, 3500);
+            })
+            .catch(err => {
+                alert("Error al procesar pago simulado: " + err.message);
+                paymentProcessingView.classList.add("hidden");
+                paymentFormView.classList.remove("hidden");
+                paymentFooterActions.classList.remove("hidden");
+            });
+        }, 2000); // Premium interactive delay
+    });
+
+    // Also call initBilling
+    initBilling();
+}
+
+function initBilling() {
+    let valTimeout;
+    
+    // Keyup access key validation
+    inputAccessKey.addEventListener("input", () => {
+        clearTimeout(valTimeout);
+        const code = inputAccessKey.value.trim().toUpperCase();
+        
+        if (!code) {
+            inputAccessKey.className = "custom-input";
+            accessKeyStatus.className = "access-status-text";
+            accessKeyStatus.textContent = "Sin clave: se aplicará tarifa de validación por fila.";
+            isAuthorized = false;
+            evaluatePaymentStatus();
+            return;
+        }
+
+        accessKeyStatus.className = "access-status-text";
+        accessKeyStatus.textContent = "Validando clave con el servidor...";
+
+        valTimeout = setTimeout(() => {
+            fetch("/api/validate_code", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    job_id: currentJobId,
+                    code: code
+                })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error("Código no válido");
+                return res.json();
+            })
+            .then(data => {
+                inputAccessKey.className = "custom-input success-glow";
+                accessKeyStatus.className = "access-status-text status-success";
+                accessKeyStatus.textContent = "✔ Acceso Corporativo Concedido (Gratis)";
+                isAuthorized = true;
+                evaluatePaymentStatus();
+                appendLog(`[VIP] Clave de acceso corporativa "${code}" validada correctamente. Búsqueda desbloqueada gratis.`, "success");
+            })
+            .catch(err => {
+                inputAccessKey.className = "custom-input error-glow";
+                accessKeyStatus.className = "access-status-text status-error";
+                accessKeyStatus.textContent = "✖ Código de acceso corporativo inválido";
+                isAuthorized = false;
+                evaluatePaymentStatus();
+            });
+        }, 350); // Small debounce
+    });
+
+    // Trigger payment modal
+    btnPayValidation.addEventListener("click", () => {
+        openPaymentModal();
+    });
+}
+
+function evaluatePaymentStatus() {
+    if (!currentJobId) return;
+
+    if (isAuthorized) {
+        billingTotalCost.textContent = "$0.00 MXN (VIP)";
+        btnPayValidation.classList.add("hidden");
+        btnStartProcess.removeAttribute("disabled");
+        btnStartProcess.querySelector("span").textContent = "Comenzar Búsqueda Masiva (VIP)";
+    } else if (isPaid) {
+        billingTotalCost.textContent = `$${amountMxn.toFixed(2)} MXN (PAGADO)`;
+        btnPayValidation.classList.add("hidden");
+        btnStartProcess.removeAttribute("disabled");
+        btnStartProcess.querySelector("span").textContent = "Comenzar Búsqueda Masiva";
+    } else {
+        billingTotalCost.textContent = `$${amountMxn.toFixed(2)} MXN`;
+        
+        if (amountMxn === 0.0) {
+            // Free tier <= 10 rows
+            btnPayValidation.classList.add("hidden");
+            btnStartProcess.removeAttribute("disabled");
+            btnStartProcess.querySelector("span").textContent = "Comenzar Búsqueda Masiva (Nivel Gratis)";
+        } else {
+            btnPayValidation.classList.remove("hidden");
+            btnPayValidation.querySelector("span").textContent = `Proceder al Pago con Tarjeta ($${amountMxn.toFixed(2)} MXN)`;
+            btnStartProcess.setAttribute("disabled", "true");
+            btnStartProcess.querySelector("span").textContent = "Comenzar Búsqueda Masiva (Bloqueado)";
+        }
+    }
+}
+
+function openPaymentModal() {
+    if (!currentJobId || amountMxn <= 0) return;
+
+    // Set totals
+    paySummaryRows.textContent = `${totalRecords} filas cargadas`;
+    paySummaryTotal.textContent = `$${amountMxn.toFixed(2)} MXN`;
+
+    // Ensure form is visible
+    paymentFormView.classList.remove("hidden");
+    paymentFooterActions.classList.remove("hidden");
+    paymentProcessingView.classList.add("hidden");
+    paymentSuccessView.classList.add("hidden");
+
+    // Show overlay
+    modalPayment.classList.remove("hidden");
+}
+
+function closePaymentModal() {
+    modalPayment.classList.add("hidden");
+    
+    // Clear CC Form inputs
+    formCcPayment.reset();
 }
 
 // ==========================================================================

@@ -361,6 +361,21 @@ def parse_raw_cookies(cookie_string):
             cookies[k] = v
     return cookies
 
+def get_proxies():
+    """
+    Returns proxy configuration if MEXICO_PROXY_URL is set in environment.
+    Allows bypassing Mexican government geoblocking from foreign servers (e.g. Render).
+    """
+    proxy_url = os.environ.get("MEXICO_PROXY_URL")
+    if proxy_url:
+        return {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+    return None
+
+AUTHORIZED_CODES = ["VIP-BUHO-2026", "FABIAN-CORP-FREE", "PRO-ACCESS"]
+
 SEP_TOKEN_CACHE = {"token": None, "expires_at": 0}
 
 def get_sep_token():
@@ -376,7 +391,7 @@ def get_sep_token():
         "Accept": "application/json"
     }
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = requests.get(url, headers=headers, proxies=get_proxies(), timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             token = data.get("access_token")
@@ -413,7 +428,7 @@ def query_sep_api(nombre, paterno, materno):
     try:
         # Respectful rate limiting
         time.sleep(random.uniform(0.1, 0.3))
-        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=15)
         
         if resp.status_code in [401, 403]:
             # Token might be invalid/expired. Retry once by clearing cache.
@@ -421,7 +436,7 @@ def query_sep_api(nombre, paterno, materno):
             token = get_sep_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
-                resp = requests.post(url, headers=headers, json=payload, timeout=15)
+                resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=15)
 
         if resp.status_code != 200:
             return {"status": "error", "message": f"Servidor SEP respondio con codigo {resp.status_code}"}
@@ -552,6 +567,9 @@ def preview_file():
         job_id = str(int(time.time()))
         # Convert df to records to store safely in active memory
         records = df.to_dict(orient="records")
+        total_rows = len(df)
+        amount_mxn = max(0.0, (total_rows - 10) * 0.10)
+        
         ACTIVE_JOBS[job_id] = {
             "records": records,
             "columns": columns,
@@ -560,7 +578,10 @@ def preview_file():
             "results": [],
             "status": "pending",
             "current_index": 0,
-            "session_cookies": {}
+            "session_cookies": {},
+            "authorized": False,
+            "paid": False,
+            "amount_mxn": round(amount_mxn, 2)
         }
 
         return jsonify({
@@ -568,7 +589,8 @@ def preview_file():
             "columns": columns,
             "mapped": mapped,
             "preview": preview_rows,
-            "total_rows": len(df)
+            "total_rows": total_rows,
+            "amount_mxn": round(amount_mxn, 2)
         })
 
     except Exception as e:
@@ -651,6 +673,35 @@ def update_mapping():
         "preview": preview_rows
     })
 
+@app.route("/api/validate_code", methods=["POST"])
+def validate_code():
+    data = request.json or {}
+    job_id = data.get("job_id")
+    code = data.get("code", "").strip().upper()
+    
+    if not job_id or job_id not in ACTIVE_JOBS:
+        return jsonify({"error": "ID de tarea inválido o expirado."}), 404
+        
+    job = ACTIVE_JOBS[job_id]
+    if code in AUTHORIZED_CODES:
+        job["authorized"] = True
+        return jsonify({"success": True, "message": "Acceso Corporativo Concedido (Gratis)"})
+    else:
+        job["authorized"] = False
+        return jsonify({"success": False, "message": "Código de acceso inválido"}), 400
+
+@app.route("/api/simulate_payment", methods=["POST"])
+def simulate_payment():
+    data = request.json or {}
+    job_id = data.get("job_id")
+    
+    if not job_id or job_id not in ACTIVE_JOBS:
+        return jsonify({"error": "ID de tarea inválido o expirado."}), 404
+        
+    job = ACTIVE_JOBS[job_id]
+    job["paid"] = True
+    return jsonify({"success": True, "message": "Pago aprobado con éxito. Búsqueda desbloqueada."})
+
 @app.route("/api/process/<job_id>")
 def process_job(job_id):
     if job_id not in ACTIVE_JOBS:
@@ -659,6 +710,14 @@ def process_job(job_id):
     job = ACTIVE_JOBS[job_id]
     records = job["records"]
     mapped = job["mapped"]
+    amount_mxn = job.get("amount_mxn", 0.0)
+    
+    # Strict backend billing check
+    if amount_mxn > 0.0 and not job.get("authorized") and not job.get("paid"):
+        def billing_error_stream():
+            error_data = {"status": "billing_required_error", "message": "Se requiere pago para procesar más de 10 registros."}
+            yield f"data: {json.dumps(error_data)}\n\n"
+        return Response(billing_error_stream(), mimetype="text/event-stream")
     
     PREFIX_MAP = {
         "MEDICINA Y SALUD": "MED",

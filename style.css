@@ -1226,3 +1226,155 @@ label {
     width: 16px;
     height: 16px;
 }
+
+/* ==========================================================================
+   Fase 4: Hybrid Model & Billing Elements
+   ========================================================================== */
+
+.hybrid-billing-container {
+    border-top: 1px solid var(--glass-border);
+    padding-top: 1.25rem;
+    margin-top: 1.25rem;
+}
+
+.text-upper {
+    text-transform: uppercase;
+}
+
+.access-status-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.35rem;
+    display: block;
+    transition: var(--transition-smooth);
+}
+
+.access-status-text.status-success {
+    color: var(--success);
+    font-weight: 600;
+    text-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+}
+
+.access-status-text.status-error {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* Custom indicator states for access key inputs */
+.custom-input.success-glow {
+    border-color: var(--success) !important;
+    box-shadow: 0 0 10px 0 rgba(16, 185, 129, 0.2) !important;
+}
+
+.custom-input.error-glow {
+    border-color: var(--danger) !important;
+    box-shadow: 0 0 10px 0 rgba(239, 68, 68, 0.2) !important;
+}
+
+/* Pricing displays */
+.pricing-display-card {
+    background: rgba(13, 20, 38, 0.3);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+
+.price-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin-bottom: 0.4rem;
+}
+
+.price-row.total-row {
+    border-top: 1px solid var(--glass-border);
+    padding-top: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.price-label {
+    color: var(--text-muted);
+}
+
+.price-val {
+    font-weight: 600;
+}
+
+.pricing-summary-card {
+    background: rgba(9, 12, 21, 0.4);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 1.15rem;
+}
+
+.row-flex {
+    display: flex;
+    align-items: center;
+}
+
+.justify-between {
+    justify-content: space-between;
+}
+
+.w-half {
+    width: 50%;
+}
+
+.pr-2 {
+    padding-right: 0.5rem;
+}
+
+.pl-2 {
+    padding-left: 0.5rem;
+}
+
+.d-block {
+    display: block;
+}
+
+.font-bold {
+    font-weight: 700;
+}
+
+.text-green {
+    color: var(--success);
+}
+
+.py-5 {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+}
+
+/* Spinner Neon Animation */
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.spinner-neon {
+    width: 60px;
+    height: 60px;
+    border: 4px solid rgba(99, 102, 241, 0.1);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s infinite linear;
+    box-shadow: 0 0 15px 0 rgba(99, 102, 241, 0.2);
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Pop success animation */
+.anim-pop {
+    animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+@keyframes popIn {
+    0% { transform: scale(0.6); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}

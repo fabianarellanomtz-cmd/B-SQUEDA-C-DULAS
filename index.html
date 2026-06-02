@@ -154,6 +154,37 @@
                             </div>
                         </div>
 
+                        <!-- Hybrid Billing & Pricing -->
+                        <div class="hybrid-billing-container mt-4">
+                            <label class="section-sub-label">Licencia / Tarifa de Validación:</label>
+                            <div class="form-group mb-3">
+                                <div class="input-icon-wrapper">
+                                    <i data-lucide="key" class="input-icon"></i>
+                                    <input type="text" id="input-access-key" class="custom-input text-upper" placeholder="Clave de Organización (Opcional)">
+                                </div>
+                                <span id="access-key-status" class="access-status-text">Sin clave: se aplicará tarifa de validación por fila.</span>
+                            </div>
+                            <div class="pricing-display-card mb-3">
+                                <div class="price-row">
+                                    <span class="price-label">Tarifa por Fila:</span>
+                                    <span class="price-val">$0.10 MXN</span>
+                                </div>
+                                <div class="price-row" style="font-size:0.8rem; color:var(--success);">
+                                    <span class="price-label">Nivel Gratuito:</span>
+                                    <span class="price-val">Primeras 10 filas gratis</span>
+                                </div>
+                                <div class="price-row total-row">
+                                    <span class="price-label">Total Estimado:</span>
+                                    <span class="price-val text-gradient" id="billing-total-cost">$0.00 MXN</span>
+                                </div>
+                            </div>
+                            
+                            <button id="btn-pay-validation" class="btn-primary btn-success-glow w-full mb-3 hidden">
+                                <i data-lucide="credit-card"></i>
+                                <span>Proceder al Pago con Tarjeta ($0.00 MXN)</span>
+                            </button>
+                        </div>
+
                         <button id="btn-start-process" class="btn-generate w-full" disabled>
                             <span>Comenzar Búsqueda Masiva</span>
                             <i data-lucide="play"></i>
@@ -280,20 +311,108 @@
             <p>&copy; 2026 BúhoCédula Pro. Diseñado con Glassmorphism para máxima excelencia operacional.</p>
         </footer>
 
-        <!-- Modal: Edit Keywords List -->
-        <div id="modal-keywords" class="modal-overlay hidden">
-            <div class="glass-card modal-content animate-zoom">
+        <!-- Modal: Pasarela de Pago Simulado Premium -->
+        <div id="modal-payment" class="modal-overlay hidden">
+            <div class="glass-card modal-content modal-md animate-zoom">
                 <div class="modal-header">
-                    <h3>Configurar Palabras Clave Médicas</h3>
-                    <button id="btn-close-keywords" class="btn-close"><i data-lucide="x"></i></button>
+                    <div class="logo">
+                        <i data-lucide="credit-card" class="icon-brand anim-pulse"></i>
+                        <span>Pasarela de Pago<span class="text-gradient"> Simulado</span></span>
+                    </div>
+                    <button id="btn-close-payment" class="btn-close"><i data-lucide="x"></i></button>
                 </div>
-                <div class="modal-body">
-                    <p class="modal-desc">Todas las cédulas cuyas carreras contengan estas palabras clave serán clasificadas como **Área Médica / Salud**. Sepáralas por comas.</p>
-                    <textarea id="textarea-keywords" class="custom-textarea" rows="6"></textarea>
+                
+                <!-- Payment details -->
+                <div class="modal-body" id="payment-form-view">
+                    <p class="modal-desc">Completa tu pago micropersonalizado de forma 100% segura. Usa cualquier número de tarjeta simulado para validar.</p>
+                    
+                    <div class="pricing-summary-card mb-4 mt-2">
+                        <div class="row-flex justify-between">
+                            <span class="summary-label">Registros Totales:</span>
+                            <span class="summary-value" id="pay-summary-rows">0 filas</span>
+                        </div>
+                        <div class="row-flex justify-between mt-1" style="color:var(--success);">
+                            <span class="summary-label">Nivel Gratuito (Descontado):</span>
+                            <span class="summary-value">-10 filas gratis</span>
+                        </div>
+                        <div class="divider mt-2 mb-2" style="height:1px; background:var(--glass-border);"></div>
+                        <div class="row-flex justify-between">
+                            <span class="summary-label" style="font-weight: 700;">Total a Pagar (MXN):</span>
+                            <span class="summary-value text-gradient" style="font-weight: 700;" id="pay-summary-total">$0.00 MXN</span>
+                        </div>
+                    </div>
+
+                    <form id="form-cc-payment" onsubmit="return false;">
+                        <div class="form-group mb-3">
+                            <label class="section-sub-label mb-1 d-block">Nombre del Titular</label>
+                            <input type="text" id="cc-name" class="custom-input" placeholder="Nombre completo como aparece en la tarjeta" required>
+                        </div>
+                        
+                        <div class="form-group mb-3">
+                            <label class="section-sub-label mb-1 d-block">Número de Tarjeta</label>
+                            <div class="input-icon-wrapper">
+                                <i data-lucide="credit-card" class="input-icon"></i>
+                                <input type="text" id="cc-number" class="custom-input" placeholder="4000 1234 5678 9010" maxlength="19" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group-row row-flex justify-between">
+                            <div class="form-group w-half pr-2">
+                                <label class="section-sub-label mb-1 d-block">Vencimiento</label>
+                                <input type="text" id="cc-expiry" class="custom-input" placeholder="MM/AA" maxlength="5" required>
+                            </div>
+                            <div class="form-group w-half pl-2">
+                                <label class="section-sub-label mb-1 d-block">CVC (Código)</label>
+                                <input type="password" id="cc-cvc" class="custom-input" placeholder="123" maxlength="4" required>
+                            </div>
+                        </div>
+                        
+                        <div class="payment-badges mt-3">
+                            <div class="chip-row text-center" style="font-size: 0.75rem; color: var(--text-muted);">
+                                <i data-lucide="lock" class="icon-inline" style="width:12px; height:12px; vertical-align:middle;"></i> Transacción cifrada SSL &middot; Sandbox de Pruebas Activo
+                            </div>
+                        </div>
+                    </form>
                 </div>
-                <div class="modal-footer">
-                    <button id="btn-cancel-keywords" class="btn-secondary">Cancelar</button>
-                    <button id="btn-save-keywords" class="btn-primary">Guardar Palabras Clave</button>
+
+                <!-- Transaction Processing View -->
+                <div class="modal-body hidden text-center py-5" id="payment-processing-view">
+                    <div class="spinner-container" style="display:flex; justify-content:center; align-items:center; height:100px;">
+                        <div class="spinner-neon"></div>
+                    </div>
+                    <h3 class="mt-4">Procesando Transacción...</h3>
+                    <p class="text-muted mt-2">Comunicando con la entidad bancaria del emisor de la tarjeta. Por favor no cierres la ventana.</p>
+                </div>
+
+                <!-- Transaction Success View -->
+                <div class="modal-body hidden text-center py-5" id="payment-success-view">
+                    <div class="success-animation-container mt-3">
+                        <i data-lucide="check-circle" style="width: 80px; height: 80px; color: var(--success);" class="anim-pop"></i>
+                    </div>
+                    <h2 class="text-gradient mt-4">¡Pago Aprobado con Éxito!</h2>
+                    <p class="mt-2" style="font-size: 1.05rem; font-weight: 500;">Se ha emitido el recibo oficial y la búsqueda masiva ha sido desbloqueada permanentemente para esta tarea.</p>
+                    <div class="receipt-card mt-4 p-3 glass-card text-left" style="background: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.2); box-shadow:none; padding:1rem; border-radius:var(--radius-md);">
+                        <div class="row-flex justify-between" style="font-size: 0.85rem; display:flex; justify-content:space-between;">
+                            <span>ID Transacción:</span>
+                            <span class="font-code text-gradient" id="receipt-tx-id" style="font-weight:600;">TX-84930-OK</span>
+                        </div>
+                        <div class="row-flex justify-between mt-1" style="font-size: 0.85rem; display:flex; justify-content:space-between;">
+                            <span>Monto Total:</span>
+                            <span style="font-weight: 700;" id="receipt-tx-amount">$0.00 MXN</span>
+                        </div>
+                        <div class="row-flex justify-between mt-1" style="font-size: 0.85rem; display:flex; justify-content:space-between;">
+                            <span>Concepto:</span>
+                            <span>Validación de Cédulas Masiva</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer mt-4" id="payment-footer-actions" style="display:flex; justify-content:flex-end; gap:1rem;">
+                    <button type="button" id="btn-cancel-payment" class="btn-secondary">Cancelar</button>
+                    <button type="submit" form="form-cc-payment" id="btn-confirm-payment" class="btn-primary btn-success-glow">
+                        <span>Confirmar Pago de Validación</span>
+                        <i data-lucide="shield-check"></i>
+                    </button>
                 </div>
             </div>
         </div>
