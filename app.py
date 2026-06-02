@@ -471,6 +471,28 @@ def get_proxies(force_refresh=False):
             
     return None
 
+import threading
+
+def prefetch_mexico_proxy_async():
+    """
+    Launches a background thread to find and cache a working Mexico proxy.
+    Pre-populates DYNAMIC_MEXICO_PROXY so requests can use it instantly.
+    """
+    if os.environ.get("MEXICO_PROXY_URL"):
+        return  # No need, using manual proxy
+
+    # Check if we are running in Render
+    if os.environ.get("RENDER") or os.environ.get("PORT"):
+        def worker():
+            try:
+                get_working_mexico_proxy(force_refresh=True)
+            except Exception as e:
+                print("Background proxy harvester error:", str(e))
+                
+        thread = threading.Thread(target=worker)
+        thread.daemon = True
+        thread.start()
+
 AUTHORIZED_CODES = ["VIP-BUHO-2026", "FABIAN-CORP-FREE", "PRO-ACCESS"]
 
 SEP_TOKEN_CACHE = {"token": None, "expires_at": 0}
@@ -735,6 +757,8 @@ def preview_file():
             "paid": False,
             "amount_mxn": round(amount_mxn, 2)
         }
+
+        prefetch_mexico_proxy_async()
 
         return jsonify({
             "job_id": job_id,
@@ -1143,5 +1167,8 @@ def download_results(job_id):
         return jsonify({"error": f"Error al generar Excel: {str(e)}"}), 500
 
 if __name__ == "__main__":
+    # Pre-fetch working proxy on startup for cloud environments
+    prefetch_mexico_proxy_async()
+    
     print("Iniciando BúhoCédula Pro en puerto 5050...")
     app.run(host="127.0.0.1", port=5050, debug=True)
