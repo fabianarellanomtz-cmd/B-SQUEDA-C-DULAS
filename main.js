@@ -45,6 +45,8 @@ const inputAccessKey = document.getElementById("input-access-key");
 const accessKeyStatus = document.getElementById("access-key-status");
 const billingTotalCost = document.getElementById("billing-total-cost");
 const btnPayValidation = document.getElementById("btn-pay-validation");
+const selectSearchSpeed = document.getElementById("select-search-speed");
+const speedAutoHint = document.getElementById("speed-auto-hint");
 
 const btnStartProcess = document.getElementById("btn-start-process");
 
@@ -103,6 +105,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initTableFilters();
     checkActiveJobOnLoad();
     initInputModeToggle();
+    initSpeedControl();
 });
 
 // Drag & Drop
@@ -224,6 +227,20 @@ function handleUploadedFile(file) {
         dropZone.classList.add("hidden");
         uploadedDetails.classList.remove("hidden");
         
+        // Auto select search speed based on total records
+        if (selectSearchSpeed) {
+            let autoSpeed = "normal";
+            if (totalRecords > 200) {
+                autoSpeed = "slow";
+            } else if (totalRecords > 50) {
+                autoSpeed = "safe";
+            }
+            selectSearchSpeed.value = autoSpeed;
+            if (speedAutoHint) {
+                speedAutoHint.style.display = "block";
+            }
+        }
+        
         // Enable configs panel
         cardConfig.classList.remove("disabled");
         
@@ -235,6 +252,9 @@ function handleUploadedFile(file) {
         
         // Populate preview table
         renderPreviewTable(data.preview);
+        
+        // Synchronize selected mapping & auto speed with backend
+        handleMappingChange();
         
         appendLog(`[EXITO] Archivo cargado con éxito. ID de Tarea: ${currentJobId}. Se identificaron ${totalRecords} filas.`, "success");
     })
@@ -346,7 +366,8 @@ function handleMappingChange() {
     
     const payload = {
         job_id: currentJobId,
-        structured: isStructured
+        structured: isStructured,
+        search_speed: selectSearchSpeed ? selectSearchSpeed.value : "normal"
     };
     
     if (isStructured) {
@@ -1038,6 +1059,10 @@ function checkActiveJobOnLoad() {
         isAuthorized = data.authorized;
         isStructured = data.structured;
 
+        if (selectSearchSpeed && data.search_speed) {
+            selectSearchSpeed.value = data.search_speed;
+        }
+
         // Restore file info view
         fileNameDisp.textContent = `Tarea recuperada (${currentJobId})`;
         fileMetaDisp.textContent = `${totalRecords} filas en esta consulta`;
@@ -1270,4 +1295,15 @@ function executeManualSearch() {
         btnSearchManual.removeAttribute("disabled");
         btnSearchManual.innerHTML = originalContent;
     });
+}
+
+function initSpeedControl() {
+    if (selectSearchSpeed) {
+        selectSearchSpeed.addEventListener("change", () => {
+            if (speedAutoHint) {
+                speedAutoHint.style.display = "none";
+            }
+            handleMappingChange();
+        });
+    }
 }

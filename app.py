@@ -531,11 +531,13 @@ def get_working_mexico_proxy(force_refresh=False):
     print("[PROXY] No se encontraron proxies activos en México.")
     return None
 
+LOCAL_PROXY_FALLBACK_ACTIVE = False
+
 def get_proxies(force_refresh=False):
     """
     Returns proxy configuration.
     1. Prioritizes MEXICO_PROXY_URL environment variable.
-    2. If running on Render/cloud, automatically queries for an active working Mexico proxy.
+    2. If running on Render/cloud OR if local proxy fallback is active, automatically queries for an active working Mexico proxy.
     """
     proxy_url = os.environ.get("MEXICO_PROXY_URL")
     if proxy_url:
@@ -544,8 +546,8 @@ def get_proxies(force_refresh=False):
             "https": proxy_url
         }
         
-    # Auto-detection for Render/cloud deployments
-    if os.environ.get("RENDER") or os.environ.get("PORT"):
+    # Auto-detection for Render/cloud deployments OR local proxy fallback active
+    if os.environ.get("RENDER") or os.environ.get("PORT") or LOCAL_PROXY_FALLBACK_ACTIVE:
         working_proxy = get_working_mexico_proxy(force_refresh=force_refresh)
         if working_proxy:
             return {
@@ -565,8 +567,8 @@ def prefetch_mexico_proxy_async():
     if os.environ.get("MEXICO_PROXY_URL"):
         return  # No need, using manual proxy
 
-    # Check if we are running in Render
-    if os.environ.get("RENDER") or os.environ.get("PORT"):
+    # Check if we are running in Render OR if local proxy fallback is active
+    if os.environ.get("RENDER") or os.environ.get("PORT") or LOCAL_PROXY_FALLBACK_ACTIVE:
         def worker():
             try:
                 get_working_mexico_proxy(force_refresh=True)
@@ -704,9 +706,15 @@ def query_sep_api(nombre, paterno, materno, num_cedula=None):
             print(f"[SEP] Intento {attempt} falló debido a excepción: {type(e).__name__} - {str(e)}")
             time.sleep(1.0)
             
-    # If we are here, 2 attempts failed with the current proxy!
+    # If we are here, 2 attempts failed with the current proxy/direct connection!
+    # Check if we should activate local proxy fallback
+    global LOCAL_PROXY_FALLBACK_ACTIVE
+    if not os.environ.get("RENDER") and not os.environ.get("PORT") and not LOCAL_PROXY_FALLBACK_ACTIVE:
+        print("[SEP] Conexión local fallando o bloqueada. ¡Activando fallback automático con proxies de México!")
+        LOCAL_PROXY_FALLBACK_ACTIVE = True
+
     # Assume the proxy is dead. Clear cache and try one final time with a fresh force-refreshed proxy.
-    print("[SEP] Ambos intentos fallaron. Asumiendo proxy inactivo. Limpiando caché de proxy...")
+    print("[SEP] Ambos intentos fallaron. Limpiando caché de proxy y reintentando...")
     global DYNAMIC_MEXICO_PROXY
     DYNAMIC_MEXICO_PROXY["proxy_url"] = None
     
@@ -869,7 +877,8 @@ def preview_file():
             "session_cookies": {},
             "authorized": False,
             "paid": False,
-            "amount_mxn": round(amount_mxn, 2)
+            "amount_mxn": round(amount_mxn, 2),
+            "search_speed": "normal"
         }
 
         prefetch_mexico_proxy_async()
@@ -912,6 +921,9 @@ def update_mapping():
     job = ACTIVE_JOBS[job_id]
     structured = data.get("structured", True)
     job["structured"] = structured
+    
+    if "search_speed" in data:
+        job["search_speed"] = data["search_speed"]
     
     # Update mapping
     if structured:
@@ -1007,7 +1019,8 @@ def job_status(job_id):
         "paid": job["paid"],
         "structured": job.get("structured", True),
         "columns": job.get("columns", []),
-        "mapped": job.get("mapped", {})
+        "mapped": job.get("mapped", {}),
+        "search_speed": job.get("search_speed", "normal")
     })
 
 @app.route("/api/pause/<job_id>", methods=["POST"])
@@ -1333,8 +1346,16 @@ def background_worker(job_id):
                 
         idx += 1
         job["current_index"] = idx
-        # Natural delay between queries to respect anti-bot
-        time.sleep(random.uniform(1.2, 2.5))
+        # Pacing delay based on selected speed
+        speed = job.get("search_speed", "normal")
+        if speed == "safe":
+            delay = random.uniform(3.0, 6.0)
+        elif speed == "slow":
+            delay = random.uniform(6.0, 12.0)
+        else: # "normal"
+            delay = random.uniform(1.2, 2.5)
+            
+        time.sleep(delay)
         
     # Complete job!
     job["status"] = "completed"

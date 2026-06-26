@@ -222,6 +222,19 @@
                             </div>
                         </div>
 
+                        <!-- Velocidad de Búsqueda -->
+                        <div class="form-group mb-3" style="margin-top: 1rem;">
+                            <label class="section-sub-label">Velocidad de Consulta:</label>
+                            <select id="select-search-speed" class="custom-select">
+                                <option value="normal" selected>Rápida (1.2s - 2.5s de espera)</option>
+                                <option value="safe">Moderada / Humana (3.0s - 6.0s de espera - Para >50 registros)</option>
+                                <option value="slow">Lenta / Ultra Segura (6.0s - 12.0s de espera - Para >200 registros)</option>
+                            </select>
+                            <span id="speed-auto-hint" class="access-status-text" style="color: #34d399; display: none; font-size: 0.8rem; margin-top: 0.25rem; font-weight: 500;">
+                                ✔ Ajustado automáticamente según el tamaño del archivo.
+                            </span>
+                        </div>
+
                         <!-- Hybrid Billing & Pricing -->
                         <div class="hybrid-billing-container mt-4">
                             <label class="section-sub-label">Licencia / Tarifa de Validación:</label>
