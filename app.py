@@ -508,26 +508,41 @@ def get_working_mexico_proxy(force_refresh=False, limit=5):
         "Accept": "application/json"
     }
     
-    # Try up to limit candidates to find a working tunnel
-    for ip_port, proto in candidates[:limit]:
+    import concurrent.futures
+
+    # Try up to limit candidates in parallel to find a working tunnel rapidly
+    to_test = candidates[:limit]
+    print(f"[PROXY] Probando {len(to_test)} candidatos en paralelo...")
+    
+    def test_single_proxy(item):
+        ip_port, proto = item
         proxy_url = f"{proto}://{ip_port}"
         proxies = {
             "http": proxy_url,
             "https": proxy_url
         }
         try:
-            print(f"[PROXY] Probando {proxy_url}...")
             # Snappy test (3.5 seconds timeout)
             resp = requests.get(test_url, headers=test_headers, proxies=proxies, timeout=3.5)
             # 200, 401, 403, 400 all mean we connected to the SEP backend successfully!
             if resp.status_code in [200, 400, 401, 403]:
-                print(f"[PROXY] ¡Conexión exitosa a través de {proxy_url}! Guardando en caché.")
-                DYNAMIC_MEXICO_PROXY["proxy_url"] = proxy_url
-                DYNAMIC_MEXICO_PROXY["last_tested"] = time.time()
                 return proxy_url
         except Exception:
             pass
-            
+        return None
+
+    # Run tests concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(to_test), 15)) as executor:
+        futures = {executor.submit(test_single_proxy, item): item for item in to_test}
+        
+        for future in concurrent.futures.as_completed(futures):
+            working_url = future.result()
+            if working_url:
+                print(f"[PROXY] ¡Conexión exitosa a través de {working_url}! Guardando en caché.")
+                DYNAMIC_MEXICO_PROXY["proxy_url"] = working_url
+                DYNAMIC_MEXICO_PROXY["last_tested"] = time.time()
+                return working_url
+                
     print("[PROXY] No se encontraron proxies activos en México.")
     return None
 
