@@ -455,7 +455,7 @@ def fetch_free_mexico_proxies():
             
     return unique_proxies
 
-def get_working_mexico_proxy(force_refresh=False):
+def get_working_mexico_proxy(force_refresh=False, limit=5):
     """
     Checks if there is a cached working Mexican proxy (HTTP or SOCKS).
     Otherwise fetches new candidates, tests up to 25 candidates, and returns the first working one.
@@ -508,8 +508,8 @@ def get_working_mexico_proxy(force_refresh=False):
         "Accept": "application/json"
     }
     
-    # Try up to 5 candidates to find a working tunnel
-    for ip_port, proto in candidates[:5]:
+    # Try up to limit candidates to find a working tunnel
+    for ip_port, proto in candidates[:limit]:
         proxy_url = f"{proto}://{ip_port}"
         proxies = {
             "http": proxy_url,
@@ -533,7 +533,7 @@ def get_working_mexico_proxy(force_refresh=False):
 
 LOCAL_PROXY_FALLBACK_ACTIVE = False
 
-def get_proxies(force_refresh=False):
+def get_proxies(force_refresh=False, limit=5):
     """
     Returns proxy configuration.
     1. Prioritizes MEXICO_PROXY_URL environment variable.
@@ -548,7 +548,7 @@ def get_proxies(force_refresh=False):
         
     # Auto-detection for Render/cloud deployments OR local proxy fallback active
     if os.environ.get("RENDER") or os.environ.get("PORT") or LOCAL_PROXY_FALLBACK_ACTIVE:
-        working_proxy = get_working_mexico_proxy(force_refresh=force_refresh)
+        working_proxy = get_working_mexico_proxy(force_refresh=force_refresh, limit=limit)
         if working_proxy:
             return {
                 "http": working_proxy,
@@ -571,7 +571,7 @@ def prefetch_mexico_proxy_async():
     if os.environ.get("RENDER") or os.environ.get("PORT") or LOCAL_PROXY_FALLBACK_ACTIVE:
         def worker():
             try:
-                get_working_mexico_proxy(force_refresh=True)
+                get_working_mexico_proxy(force_refresh=True, limit=20)
             except Exception as e:
                 print("Background proxy harvester error:", str(e))
                 
@@ -612,7 +612,7 @@ def get_sep_token():
         print("[PROXY] Limpiando caché e intentando de nuevo con force_refresh=True...")
         DYNAMIC_MEXICO_PROXY["proxy_url"] = None
         try:
-            resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True), timeout=6)
+            resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True, limit=15), timeout=6)
             if resp.status_code == 200:
                 data = resp.json()
                 token = data.get("access_token")
@@ -732,7 +732,7 @@ def query_sep_api(nombre, paterno, materno, num_cedula=None):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "application/json"
             }
-            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True), timeout=6)
+            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True, limit=15), timeout=6)
             if resp.status_code == 200:
                 raw_results = resp.json()
                 results = []
