@@ -613,7 +613,7 @@ def get_sep_token():
     
     # Try with current proxy configuration (fast 6 seconds timeout)
     try:
-        resp = requests.get(url, headers=headers, proxies=get_proxies(), timeout=6)
+        resp = requests.get(url, headers=headers, proxies=get_proxies(), timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             token = data.get("access_token")
@@ -627,7 +627,7 @@ def get_sep_token():
         print("[PROXY] Limpiando caché e intentando de nuevo con force_refresh=True...")
         DYNAMIC_MEXICO_PROXY["proxy_url"] = None
         try:
-            resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True, limit=45), timeout=6)
+            resp = requests.get(url, headers=headers, proxies=get_proxies(force_refresh=True, limit=45), timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 token = data.get("access_token")
@@ -676,7 +676,7 @@ def query_sep_api(nombre, paterno, materno, num_cedula=None):
         try:
             # Slower, natural query pacing to respect the SEP endpoint (anti-bot friendly)
             time.sleep(random.uniform(0.8, 1.6))
-            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=6)
+            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=12)
             
             if resp.status_code in [401, 403]:
                 # Token expired, clear token cache and retry immediately
@@ -685,7 +685,7 @@ def query_sep_api(nombre, paterno, materno, num_cedula=None):
                 token = get_sep_token()
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
-                    resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=6)
+                    resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(), timeout=12)
             
             if resp.status_code == 200:
                 raw_results = resp.json()
@@ -747,7 +747,7 @@ def query_sep_api(nombre, paterno, materno, num_cedula=None):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "application/json"
             }
-            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True, limit=45), timeout=6)
+            resp = requests.post(url, headers=headers, json=payload, proxies=get_proxies(force_refresh=True, limit=45), timeout=12)
             if resp.status_code == 200:
                 raw_results = resp.json()
                 results = []
